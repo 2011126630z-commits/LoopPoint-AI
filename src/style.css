@@ -1,0 +1,73 @@
+:root { font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1e2d29; background: #f7f9f7; font-synthesis: none; -webkit-font-smoothing: antialiased; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+.app { display: flex; flex-direction: column; height: 100dvh; min-height: 400px; }
+.topbar { display: flex; align-items: center; justify-content: space-between; flex: none; height: 70px; padding: 0 max(22px, calc((100vw - 1040px)/2)); border-bottom: 1px solid #e4ebe5; background: #fff; }
+.brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.logo { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: 8px; background: #164438; }
+.logo i { width: 18px; height: 18px; border: 4px solid #c8e77d; border-right-color: #62b7a8; border-radius: 50%; transform: rotate(-35deg); }
+.brand strong { display: block; font-size: 17px; line-height: 1.12; font-weight: 750; }
+.brand em { color: #2e947b; font-style: normal; }
+.brand small { display: block; margin-top: 3px; color: #8b9b8f; font-size: 11px; }
+.actions { display: flex; gap: 7px; }
+.icon-btn, .text-btn { display: grid; place-items: center; height: 36px; border: 1px solid #e0e9e1; border-radius: 7px; background: #fff; color: #2d5548; }
+.icon-btn { width: 36px; padding: 8px; }
+.icon-btn svg, .send-btn svg { width: 100%; height: 100%; }
+.text-btn { padding: 0 10px; font-size: 12px; font-weight: 650; }
+.icon-btn:hover, .text-btn:hover { background: #edf5ef; }
+.messages { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 28px max(22px, calc((100vw - 820px)/2)) 46px; }
+.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100%; padding-bottom: 9vh; text-align: center; }
+.empty-symbol { display: grid; place-items: center; width: 55px; height: 55px; margin-bottom: 20px; border: 1px solid #d5eadb; border-radius: 14px; background: #e7f2e9; color: #298671; font-size: 34px; }
+.empty h1 { margin: 0; font-size: 25px; font-weight: 720; }
+.empty p { margin: 8px 0 0; color: #839186; font-size: 14px; }
+.message { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 21px; }
+.message.user { justify-content: flex-end; }
+.avatar { display: grid; place-items: center; flex: none; width: 27px; height: 27px; margin-top: 3px; border-radius: 7px; background: #e3f0e8; color: #29806d; font-size: 18px; }
+.bubble { max-width: min(88%, 690px); padding: 11px 14px; border: 1px solid #e2eae4; border-radius: 3px 11px 11px 11px; background: #fff; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; }
+.user .bubble { border-color: #1e6d5c; border-radius: 11px 3px 11px 11px; background: #1e6d5c; color: #fff; }
+.error .bubble { border-color: #ebd6cc; background: #fff7f3; color: #96553f; }
+.composer-area { flex: none; padding: 0 20px max(12px, env(safe-area-inset-bottom)); background: #f7f9f7; }
+.composer { width: min(800px, 100%); margin: auto; padding: 10px 10px 8px; border: 1px solid #d7e3d9; border-radius: 8px; background: #fff; box-shadow: 0 7px 24px #173a2710; }
+.composer textarea { display: block; width: 100%; min-height: 47px; max-height: 180px; padding: 8px 9px; border: 0; resize: none; outline: 0; background: transparent; color: #1e2d29; line-height: 1.5; }
+.composer textarea::placeholder { color: #9aa89e; }
+.composer-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-left: 8px; }
+.model-picker { position: relative; min-width: 0; }
+.model-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: #45a38b; }
+.model-toggle { display: flex; align-items: center; gap: 7px; max-width: 190px; min-height: 32px; padding: 0 7px 0 0; border: 0; border-radius: 6px; background: transparent; color: #4e6c5a; font-size: 12px; font-weight: 650; }
+.model-toggle svg { width: 13px; height: 13px; margin-left: 2px; }
+.model-toggle:hover { color: #1c725e; }
+.model-menu { position: absolute; z-index: 5; left: -8px; bottom: calc(100% + 13px); width: 220px; padding: 5px; border: 1px solid #dae6dd; border-radius: 8px; background: #fff; box-shadow: 0 12px 28px #153d2a24; }
+.model-menu[hidden] { display: none; }
+.model-option { display: flex; flex-direction: column; align-items: flex-start; width: 100%; gap: 3px; padding: 9px 10px; border: 0; border-radius: 5px; background: transparent; color: #30483b; text-align: left; font-size: 13px; }
+.model-option small { color: #8c9b90; font-size: 11px; }
+.model-option:hover, .model-option.active { background: #ecf5ed; }
+.send-tools { display: flex; align-items: center; gap: 10px; }
+#status { color: #86978c; font-size: 12px; white-space: nowrap; }
+.send-btn { width: 35px; height: 35px; padding: 8px; border: 0; border-radius: 7px; background: #227b65; color: #fff; }
+.send-btn:disabled { opacity: .5; cursor: wait; }
+.credit { margin: 8px 0 0; text-align: center; color: #9daaa0; font-size: 11px; }
+dialog { width: min(400px, calc(100% - 30px)); padding: 24px; border: 1px solid #e0e9e1; border-radius: 8px; box-shadow: 0 24px 80px #0e30283d; }
+dialog::backdrop { background: #10261fb3; }
+.dialog-logo { display: grid; place-items: center; width: 38px; height: 38px; margin-bottom: 14px; border-radius: 9px; background: #e6f2e9; color: #288671; font-size: 24px; }
+dialog h2 { margin: 0 0 7px; font-size: 21px; }
+dialog p { margin: 0 0 20px; color: #65786c; line-height: 1.6; font-size: 13px; }
+dialog label:not(.remember) { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 700; }
+dialog input[type=password] { width: 100%; height: 44px; padding: 0 12px; border: 1px solid #cfded2; border-radius: 7px; outline: 0; }
+dialog input[type=password]:focus { border-color: #227b65; }
+.remember { display: flex; align-items: center; gap: 8px; margin: 14px 0 22px; color: #607468; font-size: 12px; }
+.remember input { accent-color: #227b65; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 9px; }
+.dialog-actions button { min-height: 39px; padding: 0 16px; border: 1px solid #dce5dd; border-radius: 7px; background: #fff; color: #476155; font-size: 13px; font-weight: 650; }
+.dialog-actions .primary { border-color: #227b65; background: #227b65; color: #fff; }
+@media (max-width: 600px) {
+  .topbar { height: 62px; padding: 0 14px; }
+  .brand strong { font-size: 16px; }
+  .messages { padding: 23px 14px 30px; }
+  .bubble { max-width: 86%; font-size: 14px; }
+  .composer-area { padding: 0 10px max(9px, env(safe-area-inset-bottom)); }
+  .composer { padding: 8px 8px 7px; }
+  .credit { margin-top: 6px; font-size: 10px; }
+  .empty h1 { font-size: 23px; }
+}

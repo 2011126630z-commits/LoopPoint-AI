@@ -1,0 +1,23 @@
+{
+  "name": "looppoint-ai",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,green \"node server.js\" \"vite --host 0.0.0.0\"",
+    "build": "vite build",
+    "build:standalone": "npm run build && node scripts/build-standalone.mjs",
+    "preview": "npm run build && NODE_ENV=production node server.js",
+    "start": "NODE_ENV=production node server.js"
+  },
+  "devDependencies": {
+    "vite": "^8.3.0"
+  },
+  "dependencies": {
+    "concurrently": "^10.0.6",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.7",
+    "express": "^5.3.0",
+    "lucide": "^1.55.0"
+  }
+}
