@@ -6,7 +6,7 @@
 
 | 版本 | 文件 | 说明 |
 | --- | --- | --- |
-| **Android** | [loopoint-ai-1.0.0.apk](./apk/loopoint-ai-1.0.0.apk) | 直接安装，桌面名称「环点AI」，约 138 KB |
+| **Android** | [loopoint-ai-1.0.1.apk](./apk/loopoint-ai-1.0.1.apk) | 直接安装，桌面名称「环点AI」，约 138 KB |
 | **单文件网页版** | [deepseek-mobile.html](./deepseek-mobile.html) | 下载后用手机浏览器打开即可 |
 | 全部发行版 | [Releases](https://github.com/2011126630z-commits/LoopPoint-AI/releases) | 各版本 APK、单文件版与更新日志 |
 
@@ -29,6 +29,20 @@ npm run build:apk
 ```
 
 打包**不需要 Gradle**：[scripts/build-apk.mjs](./scripts/build-apk.mjs) 直接用 `aapt2` 编译资源、`javac` 编译、`d8` 生成 dex、`zipalign` 对齐、`apksigner` 签名。签名用的是 [android/keystore/loopoint.jks](./android/keystore) 里的自签名密钥（密码 `looppoint`），**仅供侧载使用**；如果要上架 Google Play，请换成自己的正式密钥并妥善保管。
+
+### 升级与安装冲突
+
+新版本可以**直接覆盖安装、聊天记录和密钥都会保留**，靠的是三条固定约定：
+
+| 约定 | 当前值 | 说明 |
+| --- | --- | --- |
+| 应用包名 | `com.looppoint.ai` | 改包名等于换一个 App，旧数据不会跟着走 |
+| 签名密钥 | `android/keystore/loopoint.jks` | 换了密钥就装不上旧版本，只能先卸载 |
+| 版本号 | `versionCode = major*10000 + minor*100 + patch` | 1.0.1 → 10001，必定大于已安装版本 |
+
+这三条都由构建脚本强制：`versionCode`/`versionName` 从 `package.json` 推导并要求 manifest 一致，签名证书指纹写死在脚本里（不一致直接报错），密钥缺失也不再自动生成新密钥，而是报错提示恢复原密钥。`npm test` 会一并校验密钥文件的哈希。
+
+唯一需要卸载一次的情况：手机上已经装过**其他来源**构建的同包名应用（签名不同），系统会提示「应用未安装」——卸载那个旧包后再装本仓库的 APK 即可。
 
 ## 手机本地版
 
@@ -93,15 +107,16 @@ npm run dev
 
 ## 发版
 
-1. 改版本号：`package.json`、`android/app/src/main/AndroidManifest.xml`（`versionCode` 每次 +1，`versionName` 同步），并在 [CHANGELOG.md](./CHANGELOG.md) 顶部加一节。
-2. 验证并打包：`npm test && npm run build:apk`（APK 会自动内嵌最新的单文件版）。
-3. 提交推送后打标签并发 Release：
+1. 改版本号：`package.json` 的 `version`（例如 `1.0.2`），并在 [CHANGELOG.md](./CHANGELOG.md) 顶部加一节。
+2. 同步 `android/app/src/main/AndroidManifest.xml`：`versionName` 同上，`versionCode = major*10000 + minor*100 + patch`（`1.0.2` → `10002`，必须比上一版大）。两处不一致时构建会直接失败。
+3. 验证并打包：`npm test && npm run build:apk`（APK 会自动内嵌最新的单文件版，并清掉 `apk/` 里旧版本的安装包）。
+4. 提交推送后打标签并发 Release：
 
 ```bash
-git add -A && git commit -m "Release 1.0.0" && git push origin main
-git tag v1.0.0 && git push origin v1.0.0
-gh release create v1.0.0 --title "环点AI v1.0.0" --notes-file CHANGELOG.md \
-  apk/loopoint-ai-1.0.0.apk deepseek-mobile.html
+git add -A && git commit -m "Release 1.0.2" && git push origin main
+git tag v1.0.2 && git push origin v1.0.2
+gh release create v1.0.2 --title "环点AI v1.0.2" --notes-file CHANGELOG.md \
+  apk/loopoint-ai-1.0.2.apk deepseek-mobile.html
 ```
 
-Release 里的 APK 与仓库 `apk/` 目录是同一个文件；`npm test` 会校验 APK 是否内嵌了当前的单文件版，忘记重打会直接失败。
+Release 里的 APK 与仓库 `apk/` 目录是同一个文件；`npm test` 会校验 APK 是否内嵌了当前的单文件版、包名/版本号/签名密钥是否被改动，忘记重打或改了身份信息都会直接失败。

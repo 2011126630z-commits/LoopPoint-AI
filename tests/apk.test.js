@@ -1,13 +1,28 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import zlib from 'node:zlib'
 
 // The APK is committed so people can install it straight from the repository,
-// which means it must stay in sync with the bundled single-file app.
-const apk = await readFile(new URL('../apk/loopoint-ai-1.0.0.apk', import.meta.url))
-const standalone = await readFile(new URL('../deepseek-mobile.html', import.meta.url))
+// which means it must stay in sync with the bundled app and — crucially — keep
+// the same identity on every release, or installing an update would conflict
+// with the copy already on the phone.
+const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 const manifest = await readFile(new URL('../android/app/src/main/AndroidManifest.xml', import.meta.url), 'utf8')
+const apk = await readFile(new URL(`../apk/loopoint-ai-${pkg.version}.apk`, import.meta.url))
+const standalone = await readFile(new URL('../deepseek-mobile.html', import.meta.url))
+const keystore = await readFile(new URL('../android/keystore/loopoint.jks', import.meta.url))
+
+const PACKAGE_ID = 'com.looppoint.ai'
+// Regenerating this file would change the signature and break every installed
+// copy, so its bytes are pinned here as a tripwire.
+const KEYSTORE_SHA256 = '296102b5b14448e75a907d3fda8c5be7c014fc5f38cb3bea01ffe46d8dafdfe8'
+
+const versionCode = (() => {
+  const [major, minor, patch] = pkg.version.split('.').map(Number)
+  return String(major * 10000 + minor * 100 + patch)
+})()
 
 function readZipEntries(buffer) {
   let eocd = -1
@@ -42,6 +57,13 @@ function readZipEntry(buffer, entry) {
 }
 
 const entries = readZipEntries(apk)
+// Binary XML string pools use UTF-8 or UTF-16 depending on the string, so look
+// for either encoding.
+const containsText = (text) => apk.includes(Buffer.from(text, 'utf8')) || apk.includes(Buffer.from(text, 'utf16le'))
+// AndroidManifest.xml is deflated, so it has to be inflated before searching.
+const binaryManifest = readZipEntry(apk, entries.get('AndroidManifest.xml'))
+const containsManifestText = (text) =>
+  binaryManifest.includes(Buffer.from(text, 'utf8')) || binaryManifest.includes(Buffer.from(text, 'utf16le'))
 
 test('the APK contains a manifest, code, resources and the bundled app', () => {
   for (const name of ['AndroidManifest.xml', 'classes.dex', 'resources.arsc', 'assets/deepseek-mobile.html']) {
@@ -56,15 +78,26 @@ test('the APK bundles the current standalone app, byte for byte', () => {
   assert.ok(bundled.equals(standalone), 'the APK embeds a different deepseek-mobile.html than the one committed')
 })
 
-test('the APK is signed and declares the app identity', () => {
+test('package name, versionCode and versionName agree everywhere', () => {
+  assert.match(manifest, new RegExp(`package="${PACKAGE_ID}"`), 'the package name must never change')
+  assert.match(manifest, new RegExp(`android:versionCode="${versionCode}"`), 'manifest versionCode must follow package.json')
+  assert.match(manifest, new RegExp(`android:versionName="${pkg.version}"`), 'manifest versionName must follow package.json')
+  assert.ok(Number(versionCode) >= 10000, 'versionCode must stay well above the 1 used by the first build')
+  assert.ok(containsManifestText(pkg.version), `the APK should carry versionName ${pkg.version}`)
+})
+
+test('the signing key is the pinned one, so updates install over the old app', () => {
+  assert.equal(createHash('sha256').update(keystore).digest('hex'), KEYSTORE_SHA256,
+    'android/keystore/loopoint.jks changed: installed copies could no longer be upgraded, only uninstalled first')
   assert.ok(apk.includes(Buffer.from('APK Sig Block 42')), 'APK Signature Scheme v2/v3 block not found')
-  const utf8 = apk.includes(Buffer.from('环点AI', 'utf8'))
-  const utf16 = apk.includes(Buffer.from('环点AI', 'utf16le'))
-  assert.ok(utf8 || utf16, 'resources must carry the 环点AI label')
+  assert.ok(containsManifestText(PACKAGE_ID), 'the package id must be embedded')
+})
+
+test('the APK declares the app identity 环点AI', () => {
+  assert.ok(containsText('环点AI'), 'resources must carry the 环点AI label')
   assert.match(manifest, /android:label="@string\/app_name"/)
   assert.match(manifest, /<string name="app_name">环点AI<\/string>|app_name/)
   assert.match(manifest, /android.permission.INTERNET/)
-  assert.match(manifest, /package="com\.looppoint\.ai"/)
 })
 
 test('the launcher ships adaptive icons for every density', async () => {

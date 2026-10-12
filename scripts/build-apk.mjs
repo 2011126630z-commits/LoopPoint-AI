@@ -19,19 +19,33 @@ const work = path.join(root, 'build', 'apk')
 const android = path.join(root, 'android', 'app', 'src', 'main')
 const outDir = path.join(root, 'apk')
 
+const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'))
+const versionName = pkg.version
+const [major, minor, patch] = versionName.split('.').map(Number)
+if (![major, minor, patch].every(Number.isInteger) || minor > 99 || patch > 99) {
+  throw new Error(`Unsupported version "${versionName}": minor and patch must stay below 100`)
+}
+// Android only upgrades in place when versionCode strictly increases, so it is
+// derived from the semver instead of being maintained by hand: 1.0.1 -> 10001.
+const versionCode = String(major * 10000 + minor * 100 + patch)
+
 const APP = {
-  versionCode: '1',
-  versionName: '1.0.0',
+  versionCode,
+  versionName,
   packageId: 'com.looppoint.ai',
   minSdk: '24',
   targetSdk: '34',
-  fileName: 'loopoint-ai-1.0.0.apk',
+  fileName: `loopoint-ai-${versionName}.apk`,
 }
 const KEYSTORE = {
   file: path.join(root, 'android', 'keystore', 'loopoint.jks'),
   alias: 'looppoint',
   password: 'looppoint',
 }
+// Pinned so a rebuild can never ship a package signed with a different key than
+// the one already installed on people's phones (that shows up as "App not
+// installed" and forces an uninstall, losing local chat history).
+const EXPECTED_CERT_SHA256 = '77eb6dde1bfea152aeee218503e4756a90a1a67541a712cd1be4899fb588f5a6'
 
 const listDir = (directory) => {
   try { return readdirSync(directory) } catch { return [] }
@@ -109,8 +123,28 @@ async function main() {
   for (const [file, hint] of [[asset, 'npm run build:standalone'], [launcher, 'python scripts/build-icons.py']]) {
     if (!exists(file)) throw new Error(`${path.relative(root, file)} is missing. Run: ${hint}`)
   }
-  for (const tool of [androidJar, exe('aapt2'), exe('zipalign'), bat('d8'), bat('apksigner'), jdk('javac'), jdk('jar'), jdk('keytool')]) {
+  for (const tool of [androidJar, exe('aapt2'), exe('zipalign'), bat('d8'), bat('apksigner'), jdk('javac'), jdk('jar')]) {
     if (!exists(tool)) throw new Error(`Missing build tool: ${tool}`)
+  }
+  if (!exists(KEYSTORE.file)) {
+    throw new Error('android/keystore/loopoint.jks is missing. It is committed so every build upgrades the '
+      + 'already-installed app; building with a new key would conflict with existing installs.')
+  }
+
+  // package.json is the single source of truth for the version, and the manifest
+  // has to agree, otherwise a release could ship a stale versionCode.
+  const manifest = readFileSync(path.join(android, 'AndroidManifest.xml'), 'utf8')
+  const declared = {
+    package: /package="([^"]+)"/.exec(manifest)?.[1],
+    versionCode: /android:versionCode="([^"]*)"/.exec(manifest)?.[1],
+    versionName: /android:versionName="([^"]*)"/.exec(manifest)?.[1],
+  }
+  if (declared.package !== APP.packageId) {
+    throw new Error(`AndroidManifest.xml package="${declared.package}" must stay ${APP.packageId}; renaming it makes every install a separate app.`)
+  }
+  if (declared.versionCode !== APP.versionCode || declared.versionName !== APP.versionName) {
+    throw new Error(`AndroidManifest.xml is ${declared.versionName} (${declared.versionCode}) but package.json is `
+      + `${APP.versionName} (${APP.versionCode}). Update the manifest so the release numbers stay in step.`)
   }
 
   await rm(work, { recursive: true, force: true })
@@ -122,6 +156,7 @@ async function main() {
 
   console.log(`SDK         ${sdk}`)
   console.log(`build-tools ${buildToolsName}  platform ${platform}  jdk ${javaHome}`)
+  console.log(`package     ${APP.packageId} ${APP.versionName} (versionCode ${APP.versionCode})`)
 
   run(exe('aapt2'), ['compile', '--dir', path.join(android, 'res'), '-o', path.join(work, 'res.zip')])
   run(exe('aapt2'), [
@@ -148,25 +183,28 @@ async function main() {
   run(jdk('jar'), ['--update', '--file', path.join(work, 'base.apk'), '-C', path.join(work, 'dex'), 'classes.dex'])
   run(exe('zipalign'), ['-f', '-p', '4', path.join(work, 'base.apk'), path.join(work, 'aligned.apk')])
 
-  await mkdir(path.dirname(KEYSTORE.file), { recursive: true })
-  if (!exists(KEYSTORE.file)) {
-    console.log('Creating the sideload signing key (self-signed, not for Play publishing)')
-    run(jdk('keytool'), ['-genkeypair', '-keystore', KEYSTORE.file, '-storetype', 'PKCS12',
-      '-alias', KEYSTORE.alias, '-keyalg', 'RSA', '-keysize', '2048', '-validity', '10950',
-      '-storepass', KEYSTORE.password, '-keypass', KEYSTORE.password,
-      '-dname', 'CN=LoopPoint AI, O=LoopPoint AI, C=CN'])
-  }
-
   const output = path.join(outDir, APP.fileName)
   run(bat('apksigner'), ['sign', '--ks', KEYSTORE.file, '--ks-key-alias', KEYSTORE.alias,
     '--ks-pass', `pass:${KEYSTORE.password}`, '--key-pass', `pass:${KEYSTORE.password}`,
     '--v1-signing-enabled', 'true', '--v2-signing-enabled', 'true', '--v3-signing-enabled', 'true', '--v4-signing-enabled', 'false',
     '--out', output, path.join(work, 'aligned.apk')])
-  run(bat('apksigner'), ['verify', '--verbose', '--print-certs', output])
+  const certificates = run(bat('apksigner'), ['verify', '--verbose', '--print-certs', output])
+  const certSha256 = /certificate SHA-256 digest:\s*([0-9a-f]{64})/i.exec(certificates)?.[1]?.toLowerCase()
+  if (certSha256 !== EXPECTED_CERT_SHA256) {
+    throw new Error(`The APK is signed with ${certSha256}, not the pinned signing certificate. Devices with the `
+      + 'released app installed would reject this build ("App not installed"). Restore android/keystore/loopoint.jks.')
+  }
 
   const badging = run(exe('aapt2'), ['dump', 'badging', output])
   for (const line of badging.split('\n')) {
     if (/^(package|application-label|launchable-activity|sdkVersion|targetSdkVersion|uses-permission)/.test(line)) console.log(`  ${line}`)
+  }
+
+  // One APK per repo keeps "which file do I install?" unambiguous; older
+  // versions stay available as release assets.
+  for (const stale of listDir(outDir).filter((name) => /^loopoint-ai-.*\.apk$/.test(name) && name !== APP.fileName)) {
+    await rm(path.join(outDir, stale), { force: true })
+    console.log(`Removed stale ${stale}`)
   }
 
   const bytes = await stat(output)
