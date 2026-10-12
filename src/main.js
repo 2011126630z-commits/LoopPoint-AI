@@ -1,8 +1,9 @@
 import './style.css'
-import { createIcons, Plus, ArrowUp, Square, Settings2, ChevronDown, ClipboardPaste, X, Trash2, History } from 'lucide'
+import { createIcons, Plus, ArrowUp, Square, Settings2, ChevronDown, ClipboardPaste, X, Trash2, History, Copy, RefreshCw, Download, Upload } from 'lucide'
 import { providers, providerById, providerForModel, detectProvider, modelName } from './providers.js'
 import { buildHistory, outputLimit, streamChat } from './chat.js'
-import { cleanConversations, cleanMemories, compactMessages, explicitMemory } from './memory.js'
+import { buildBackup, cleanConversations, cleanMemories, compactMessages, explicitMemory, mergeBackup, parseBackup } from './memory.js'
+import { renderMarkdown } from './markdown.js'
 
 const localMode = window.LOOPPOINT_STANDALONE === true
 const $ = (selector) => document.querySelector(selector)
@@ -109,6 +110,11 @@ $('#app').innerHTML = `
       <div class="sheet-head"><div><h2>历史与记忆</h2><small>仅保存在这台设备的浏览器中</small></div><button id="closeLibrary" class="icon-btn" type="button" aria-label="关闭"><i data-lucide="x"></i></button></div>
       <div class="library-tabs" role="tablist"><button id="historyTab" type="button" role="tab" aria-selected="true">历史对话</button><button id="memoryTab" type="button" role="tab" aria-selected="false">长期记忆</button></div>
       <div class="sheet-scroll">
+        <div class="library-tools">
+          <button id="exportBackup" class="text-btn" type="button" title="把对话和记忆导出为 JSON 备份"><i data-lucide="download"></i>导出备份</button>
+          <button id="importBackup" class="text-btn" type="button" title="从 JSON 备份恢复对话和记忆"><i data-lucide="upload"></i>导入备份</button>
+          <input id="importFile" type="file" accept="application/json,.json" hidden>
+        </div>
         <div id="historyView"><div id="historyList" class="library-list"></div></div>
         <div id="memoryView" hidden><form id="memoryForm" class="memory-form"><input id="memoryInput" maxlength="240" placeholder="添加要记住的内容" aria-label="添加记忆"><button type="submit" title="添加记忆" aria-label="添加记忆"><i data-lucide="plus"></i></button></form><div id="memoryList" class="library-list"></div></div>
       </div>
@@ -142,7 +148,7 @@ $('#app').innerHTML = `
     </section>
   </div>
 `
-createIcons({ icons: { Plus, ArrowUp, Square, Settings2, ChevronDown, ClipboardPaste, X, Trash2, History } })
+createIcons({ icons: { Plus, ArrowUp, Square, Settings2, ChevronDown, ClipboardPaste, X, Trash2, History, Copy, RefreshCw, Download, Upload } })
 
 function libraryRow(text, detail, onOpen, onDelete, selected = false) {
   const row = document.createElement('div')
@@ -217,6 +223,41 @@ function showLibraryTab(tab) {
   $('#memoryTab').setAttribute('aria-selected', String(tab === 'memory'))
 }
 
+async function copyText(text, message) {
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('unavailable')
+    await navigator.clipboard.writeText(text)
+    toast(message)
+  } catch {
+    toast('无法访问剪贴板，请长按选择复制')
+  }
+}
+
+// Assistant replies are rendered as Markdown once complete; while streaming we
+// keep the plain text path so long replies do not re-parse on every frame.
+function paintBubble(bubble, message, rendered = message.role === 'assistant' && !message.pending) {
+  if (rendered) {
+    bubble.innerHTML = renderMarkdown(message.content)
+    bubble.classList.add('md')
+  } else {
+    bubble.textContent = message.content
+    bubble.classList.remove('md')
+  }
+}
+
+function actionButton(icon, label, handler) {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'message-action'
+  button.title = label
+  button.setAttribute('aria-label', label)
+  const mark = document.createElement('i')
+  mark.setAttribute('data-lucide', icon)
+  button.append(mark)
+  button.addEventListener('click', handler)
+  return button
+}
+
 function renderMessages() {
   const list = $('#messages')
   list.replaceChildren()
@@ -226,7 +267,7 @@ function renderMessages() {
     empty.innerHTML = '<div class="empty-symbol">✳</div><h1>从这里开始</h1><p>把你的想法发过来。</p>'
     list.append(empty)
   }
-  for (const message of messages) {
+  messages.forEach((message, index) => {
     const row = document.createElement('div')
     row.className = `message ${message.role}${message.error ? ' error' : ''}`
     if (message.role === 'assistant') {
@@ -237,10 +278,21 @@ function renderMessages() {
     }
     const bubble = document.createElement('div')
     bubble.className = 'bubble'
-    bubble.textContent = message.content
+    paintBubble(bubble, message)
     row.append(bubble)
+    if (!message.pending) {
+      const actions = document.createElement('div')
+      actions.className = 'message-actions'
+      actions.append(actionButton('copy', '复制', () => copyText(message.content, '已复制')))
+      if (message.role === 'assistant' && index === messages.length - 1) {
+        actions.append(actionButton('refresh-cw', '重新生成', () => regenerateReply()))
+      }
+      actions.append(actionButton('trash-2', '删除', () => deleteMessage(index)))
+      row.append(actions)
+    }
     list.append(row)
-  }
+  })
+  createIcons({ icons: { Copy, RefreshCw, Trash2 }, nameAttr: 'data-lucide', attrs: { 'aria-hidden': 'true' }, root: list })
   list.scrollTop = list.scrollHeight
   return list.lastElementChild?.querySelector('.bubble')
 }
@@ -297,23 +349,23 @@ function setSending(value) {
   $('#profileButton').disabled = value
 }
 
-async function sendMessage() {
-  const content = $('#prompt').value.trim()
-  if (!content || sending) return
+function requestContext() {
   const key = keys[activeProvider.id]
   const proxy = !localMode && activeProvider.id === 'deepseek' && !key
   if (!key && !proxy) {
     openSettings()
     toast(`请先添加 ${activeProvider.name} 的 API Key`)
-    return
+    return null
   }
+  return { key, proxy, provider: activeProvider, model: activeModel }
+}
+
+async function sendMessage() {
+  const content = $('#prompt').value.trim()
+  if (!content || sending) return
+  const context = requestContext()
+  if (!context) return
   closeModelMenu()
-  const version = conversationVersion
-  const provider = activeProvider
-  const model = activeModel
-  const request = new AbortController()
-  controller = request
-  setSending(true)
   $('#prompt').value = ''
   $('#prompt').style.height = ''
   messages = compactMessages([...messages, { role: 'user', content }])
@@ -324,6 +376,40 @@ async function sendMessage() {
     toast('已加入长期记忆')
   }
   persistConversation()
+  await streamReply(context)
+}
+
+function deleteMessage(index) {
+  if (sending) return
+  const target = messages[index]
+  if (!target) return
+  // Deleting a question also drops the answer it produced.
+  messages.splice(index, target.role === 'user' && messages[index + 1]?.role === 'assistant' ? 2 : 1)
+  if (!messages.length) {
+    conversationVersion++
+    conversations = conversations.filter((entry) => entry.id !== activeConversationId)
+    activeConversationId = null
+    writeStorage(conversationsName, conversations)
+  } else {
+    persistConversation()
+  }
+  renderMessages()
+  if ($('#librarySheet').classList.contains('open')) renderLibrary()
+}
+
+async function regenerateReply() {
+  if (sending || messages.at(-1)?.role !== 'assistant') return
+  const context = requestContext()
+  if (!context) return
+  messages.pop()
+  await streamReply(context)
+}
+
+async function streamReply({ key, proxy, provider, model }) {
+  const version = conversationVersion
+  const request = new AbortController()
+  controller = request
+  setSending(true)
   const history = buildHistory(messages, saveTokens, memories)
   const reply = { role: 'assistant', content: '正在思考…', pending: true }
   messages.push(reply)
@@ -380,7 +466,7 @@ async function sendMessage() {
     if (frame !== null) cancelAnimationFrame(frame)
     if (version === conversationVersion) {
       reply.pending = false
-      if (messages.at(-1) === reply) bubble.textContent = reply.content
+      if (messages.at(-1) === reply) paintBubble(bubble, reply, true)
       else renderMessages()
       setSending(false)
       persistConversation()
@@ -393,6 +479,12 @@ $('#composer').addEventListener('submit', (event) => {
   event.preventDefault()
   if (sending) controller?.abort()
   else sendMessage()
+})
+$('#messages').addEventListener('click', (event) => {
+  const button = event.target.closest('.code-copy')
+  if (!button) return
+  const code = button.closest('.code-block')?.querySelector('code')
+  if (code) copyText(code.textContent, '代码已复制')
 })
 $('#prompt').addEventListener('input', () => {
   $('#prompt').style.height = 'auto'
@@ -421,6 +513,49 @@ $('#closeLibrary').addEventListener('click', closeLibrary)
 $('#libraryBackdrop').addEventListener('click', closeLibrary)
 $('#historyTab').addEventListener('click', () => showLibraryTab('history'))
 $('#memoryTab').addEventListener('click', () => showLibraryTab('memory'))
+
+function exportBackup() {
+  const payload = buildBackup(conversations, memories)
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `looppoint-backup-${payload.exportedAt.slice(0, 10)}.json`
+  document.body.append(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
+  toast('备份已导出')
+}
+$('#exportBackup').addEventListener('click', exportBackup)
+$('#importBackup').addEventListener('click', () => $('#importFile').click())
+$('#importFile').addEventListener('change', async (event) => {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  try {
+    const incoming = parseBackup(await file.text())
+    const ask = globalThis.confirm
+    const label = `导入将合并 ${incoming.conversations.length} 条对话和 ${incoming.memories.length} 条记忆`
+    if (typeof ask === 'function' && !ask(`${label}，是否继续？`)) return
+    const merged = mergeBackup({ conversations, memories }, incoming)
+    conversationVersion++
+    controller?.abort()
+    setSending(false)
+    conversations = merged.conversations
+    memories = merged.memories
+    const current = conversations[0]
+    activeConversationId = current?.id || null
+    messages = current?.messages.map((message) => ({ ...message })) || []
+    writeStorage(conversationsName, conversations)
+    writeStorage(memoriesName, memories)
+    renderMessages()
+    renderLibrary()
+    toast('备份已导入')
+  } catch (error) {
+    toast(error.message || '备份文件无法读取')
+  }
+})
 $('#memoryForm').addEventListener('submit', (event) => {
   event.preventDefault()
   const text = $('#memoryInput').value.trim()

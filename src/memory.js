@@ -31,3 +31,45 @@ export function cleanMemories(value) {
     id: item.id, text: item.text.trim().slice(0, 240), createdAt: Number(item.createdAt) || Date.now(),
   }))
 }
+
+export const BACKUP_FORMAT = 'looppoint-ai-backup'
+
+export function buildBackup(conversations, memories, now = new Date()) {
+  return {
+    format: BACKUP_FORMAT,
+    version: 1,
+    exportedAt: now.toISOString(),
+    conversations: cleanConversations(conversations),
+    memories: cleanMemories(memories),
+  }
+}
+
+export function parseBackup(text) {
+  let data
+  try {
+    data = JSON.parse(String(text ?? ''))
+  } catch {
+    throw new Error('备份文件不是有效的 JSON')
+  }
+  if (!data || typeof data !== 'object') throw new Error('备份文件内容不完整')
+  const conversations = cleanConversations(data.conversations)
+  const memories = cleanMemories(data.memories)
+  if (!conversations.length && !memories.length) throw new Error('备份里没有可导入的对话或记忆')
+  return { conversations, memories }
+}
+
+// Incoming entries win on id; memories are merged by text.
+export function mergeBackup(current, incoming) {
+  const conversations = [...cleanConversations(current?.conversations)]
+  for (const entry of cleanConversations(incoming?.conversations)) {
+    const at = conversations.findIndex((item) => item.id === entry.id)
+    if (at === -1) conversations.push(entry)
+    else conversations[at] = entry
+  }
+  const memories = [...cleanMemories(current?.memories)]
+  for (const item of cleanMemories(incoming?.memories)) {
+    if (!memories.some((entry) => entry.text === item.text)) memories.push(item)
+  }
+  conversations.sort((a, b) => b.updatedAt - a.updatedAt)
+  return { conversations: cleanConversations(conversations), memories: cleanMemories(memories) }
+}

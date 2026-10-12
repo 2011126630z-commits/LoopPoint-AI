@@ -1,4 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises'
+import vm from 'node:vm'
 import path from 'node:path'
 
 const root = path.resolve(import.meta.dirname, '..')
@@ -10,9 +11,18 @@ if (!cssPath || !jsPath) throw new Error('Vite output is missing CSS or JavaScri
 
 const css = await readFile(path.join(root, 'dist', cssPath.slice(1)), 'utf8')
 const js = await readFile(path.join(root, 'dist', jsPath.slice(1)), 'utf8')
-html = html.replace(/<link[^>]+rel="icon"[^>]*>/, '')
-html = html.replace(/<link[^>]+href="\/assets\/[^"]+\.css"[^>]*>/, `<style>${css}</style>`)
-html = html.replace(/<script[^>]+src="\/assets\/[^"]+\.js"[^>]*><\/script>/, '')
-html = html.replace('</body>', `<script>window.LOOPPOINT_STANDALONE=true;</script><script>${js.replaceAll('</script', '<\\/script')}</script></body>`)
+const inlinedJs = js.replaceAll('</script', '<\\/script')
+
+// Replacement functions keep `$&`, `$'` and `` $` `` inside the bundle from
+// being expanded as replacement patterns, which would corrupt the output.
+html = html.replace(/<link[^>]+rel="icon"[^>]*>/, () => '')
+html = html.replace(/<link[^>]+href="\/assets\/[^"]+\.css"[^>]*>/, () => `<style>${css}</style>`)
+html = html.replace(/<script[^>]+src="\/assets\/[^"]+\.js"[^>]*><\/script>/, () => '')
+html = html.replace('</body>', () => `<script>window.LOOPPOINT_STANDALONE=true;</script><script>${inlinedJs}</script></body>`)
+
+const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((match) => match[1])
+if (scripts.at(-1) !== inlinedJs) throw new Error('The inlined bundle was altered while building the standalone file.')
+new vm.Script(inlinedJs, { filename: 'standalone-bundle.js' })
+
 await writeFile(path.join(root, 'deepseek-mobile.html'), html)
-console.log('Built deepseek-mobile.html')
+console.log(`Built deepseek-mobile.html (${inlinedJs.length} chars of inline JavaScript)`)
