@@ -29,4 +29,5 @@ test('standalone file keeps assets inline and drops external references', () => 
   assert.ok(source.includes('<style>'), 'CSS should be inlined')
   assert.ok(!/<script[^>]+src=/.test(source), 'no external script tags')
   assert.ok(!/<link[^>]+href="\/assets\//.test(source), 'no external asset links')
+  assert.ok(!source.includes('\r'), 'standalone file must use LF endings so CI can compare it byte-for-byte')
 })

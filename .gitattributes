@@ -1,0 +1,3 @@
+# The standalone build is generated, byte-compared in CI and downloaded by
+# users: keep it as text with LF endings on every platform.
+deepseek-mobile.html text eol=lf

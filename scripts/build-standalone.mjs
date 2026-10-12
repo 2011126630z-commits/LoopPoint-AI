@@ -4,13 +4,17 @@ import path from 'node:path'
 
 const root = path.resolve(import.meta.dirname, '..')
 const htmlPath = path.join(root, 'dist', 'index.html')
-let html = await readFile(htmlPath, 'utf8')
+// Vite inherits the checkout's line endings (and can leave stray CRs behind
+// when it drops the script tag), so normalise everything to LF: the committed
+// standalone file must be byte-identical on Windows and CI.
+const readLf = async (file) => (await readFile(file, 'utf8')).replace(/\r\n?/g, '\n')
+let html = await readLf(htmlPath)
 const cssPath = html.match(/<link[^>]+href="(\/assets\/[^"]+\.css)"[^>]*>/)?.[1]
 const jsPath = html.match(/<script[^>]+src="(\/assets\/[^"]+\.js)"[^>]*><\/script>/)?.[1]
 if (!cssPath || !jsPath) throw new Error('Vite output is missing CSS or JavaScript assets.')
 
-const css = await readFile(path.join(root, 'dist', cssPath.slice(1)), 'utf8')
-const js = await readFile(path.join(root, 'dist', jsPath.slice(1)), 'utf8')
+const css = await readLf(path.join(root, 'dist', cssPath.slice(1)))
+const js = await readLf(path.join(root, 'dist', jsPath.slice(1)))
 const inlinedJs = js.replaceAll('</script', '<\\/script')
 
 // Replacement functions keep `$&`, `$'` and `` $` `` inside the bundle from
