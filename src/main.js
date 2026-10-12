@@ -1,12 +1,15 @@
 import './style.css'
-import { createIcons, Plus, ArrowUp, Square, Settings2, ChevronDown, ClipboardPaste, X, Trash2 } from 'lucide'
+import { createIcons, Plus, ArrowUp, Square, Settings2, ChevronDown, ClipboardPaste, X, Trash2, History } from 'lucide'
 import { providers, providerById, providerForModel, detectProvider, modelName } from './providers.js'
 import { buildHistory, outputLimit, streamChat } from './chat.js'
+import { cleanConversations, cleanMemories, explicitMemory } from './memory.js'
 
 const localMode = window.LOOPPOINT_STANDALONE === true
 const $ = (selector) => document.querySelector(selector)
 const vaultName = 'looppoint_keys_v2'
 const preferenceName = 'looppoint_preferences'
+const conversationsName = 'looppoint_conversations_v1'
+const memoriesName = 'looppoint_memories_v1'
 const tierNames = { low: '低', medium: '中', high: '高' }
 const speedNames = { fast: '快速', standard: '标准' }
 
@@ -28,7 +31,10 @@ let intelligence = ['low', 'medium', 'high'].includes(prefs.intelligence) ? pref
 let speed = ['fast', 'standard'].includes(prefs.speed) ? prefs.speed : 'standard'
 let saveTokens = Boolean(prefs.saveTokens)
 let activeModel = activeProvider.models.some((model) => model.id === prefs.model) ? prefs.model : activeProvider.presets[intelligence]
-let messages = []
+let conversations = cleanConversations(readStorage(conversationsName, []))
+let memories = cleanMemories(readStorage(memoriesName, []))
+let activeConversationId = conversations[0]?.id || null
+let messages = conversations[0]?.messages.map((message) => ({ ...message })) || []
 let sending = false
 let controller = null
 let conversationVersion = 0
@@ -38,6 +44,24 @@ function persistPreferences() {
   writeStorage(preferenceName, {
     provider: activeProvider.id, model: activeModel, intelligence, speed, saveTokens,
   })
+}
+function persistConversation() {
+  if (!messages.length) return
+  if (!activeConversationId) activeConversationId = crypto.randomUUID()
+  const item = {
+    id: activeConversationId,
+    title: messages.find((message) => message.role === 'user')?.content.trim().slice(0, 32) || '新对话',
+    updatedAt: Date.now(),
+    messages: messages.filter((message) => message.content !== '正在思考…').slice(-100),
+  }
+  conversations = cleanConversations([item, ...conversations.filter((entry) => entry.id !== activeConversationId)])
+  if (!writeStorage(conversationsName, conversations)) toast('浏览器未能保存对话记录')
+  renderLibrary()
+}
+function persistMemories() {
+  memories = cleanMemories(memories)
+  if (!writeStorage(memoriesName, memories)) toast('浏览器未能保存记忆')
+  renderLibrary()
 }
 function toast(message) {
   const element = $('#toast')
@@ -52,6 +76,7 @@ $('#app').innerHTML = `
     <header class="topbar">
       <div class="brand"><span class="logo" aria-hidden="true"><i></i></span><span><strong>LoopPoint <em>AI</em></strong><small>与想法继续对话</small></span></div>
       <div class="actions">
+        <button id="library" class="icon-btn" type="button" aria-label="历史与记忆" title="历史与记忆"><i data-lucide="history"></i></button>
         <button id="newChat" class="icon-btn" type="button" aria-label="新对话" title="新对话"><i data-lucide="plus"></i></button>
         <button id="settings" class="icon-btn" type="button" aria-label="设置" title="设置"><i data-lucide="settings-2"></i></button>
       </div>
@@ -76,6 +101,17 @@ $('#app').innerHTML = `
       </form>
       <p class="credit">由所选模型提供回答</p>
     </div>
+  </div>
+  <div id="librarySheet" class="sheet" aria-hidden="true">
+    <div id="libraryBackdrop" class="sheet-backdrop"></div>
+    <section class="sheet-panel" aria-label="历史与记忆">
+      <div class="sheet-head"><div><h2>历史与记忆</h2><small>仅保存在这台设备的浏览器中</small></div><button id="closeLibrary" class="icon-btn" type="button" aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <div class="library-tabs" role="tablist"><button id="historyTab" type="button" role="tab" aria-selected="true">历史对话</button><button id="memoryTab" type="button" role="tab" aria-selected="false">长期记忆</button></div>
+      <div class="sheet-scroll">
+        <div id="historyView"><div id="historyList" class="library-list"></div></div>
+        <div id="memoryView" hidden><form id="memoryForm" class="memory-form"><input id="memoryInput" maxlength="240" placeholder="添加要记住的内容" aria-label="添加记忆"><button type="submit" title="添加记忆" aria-label="添加记忆"><i data-lucide="plus"></i></button></form><div id="memoryList" class="library-list"></div></div>
+      </div>
+    </section>
   </div>
   <div id="sheet" class="sheet" aria-hidden="true">
     <div id="sheetBackdrop" class="sheet-backdrop"></div>
@@ -105,7 +141,80 @@ $('#app').innerHTML = `
     </section>
   </div>
 `
-createIcons({ icons: { Plus, ArrowUp, Square, Settings2, ChevronDown, ClipboardPaste, X, Trash2 } })
+createIcons({ icons: { Plus, ArrowUp, Square, Settings2, ChevronDown, ClipboardPaste, X, Trash2, History } })
+
+function libraryRow(text, detail, onOpen, onDelete, selected = false) {
+  const row = document.createElement('div')
+  row.className = `library-row${selected ? ' selected' : ''}`
+  const open = document.createElement(onOpen ? 'button' : 'div')
+  if (onOpen) open.type = 'button'
+  open.className = 'library-item'
+  open.textContent = text
+  if (detail) {
+    const small = document.createElement('small')
+    small.textContent = detail
+    open.append(small)
+  }
+  if (onOpen) open.addEventListener('click', onOpen)
+  const remove = document.createElement('button')
+  remove.type = 'button'
+  remove.className = 'quiet-icon'
+  remove.title = '删除'
+  remove.setAttribute('aria-label', `删除${text}`)
+  const icon = document.createElement('i')
+  icon.setAttribute('data-lucide', 'trash-2')
+  remove.append(icon)
+  remove.addEventListener('click', onDelete)
+  row.append(open, remove)
+  return row
+}
+
+function renderLibrary() {
+  const historyList = $('#historyList')
+  historyList.replaceChildren()
+  for (const entry of conversations) historyList.append(libraryRow(entry.title, new Date(entry.updatedAt).toLocaleDateString('zh-CN'), () => {
+    conversationVersion++
+    controller?.abort()
+    setSending(false)
+    activeConversationId = entry.id
+    messages = entry.messages.map((message) => ({ ...message }))
+    renderMessages()
+    closeLibrary()
+  }, () => {
+    conversations = conversations.filter((item) => item.id !== entry.id)
+    if (activeConversationId === entry.id) { conversationVersion++; controller?.abort(); setSending(false); activeConversationId = null; messages = []; renderMessages() }
+    writeStorage(conversationsName, conversations)
+    renderLibrary()
+  }, entry.id === activeConversationId))
+  if (!conversations.length) historyList.textContent = '暂无历史对话'
+  const memoryList = $('#memoryList')
+  memoryList.replaceChildren()
+  for (const item of memories) memoryList.append(libraryRow(item.text, '', null, () => {
+    memories = memories.filter((entry) => entry.id !== item.id)
+    persistMemories()
+    toast('已删除记忆')
+  }))
+  if (!memories.length) memoryList.textContent = '暂无长期记忆'
+  createIcons({ icons: { Trash2 }, nameAttr: 'data-lucide', attrs: { 'aria-hidden': 'true' }, root: $('#librarySheet') })
+}
+
+function closeLibrary() {
+  $('#librarySheet').classList.remove('open')
+  $('#librarySheet').setAttribute('aria-hidden', 'true')
+}
+function openLibrary() {
+  closeSettings()
+  closeModelMenu()
+  renderLibrary()
+  $('#librarySheet').classList.add('open')
+  $('#librarySheet').setAttribute('aria-hidden', 'false')
+}
+function showLibraryTab(tab) {
+  $('#historyView').hidden = tab !== 'history'
+  $('#memoryView').hidden = tab !== 'memory'
+  $('#historyTab').setAttribute('aria-selected', String(tab === 'history'))
+  $('#memoryTab').setAttribute('aria-selected', String(tab === 'memory'))
+}
 
 function renderMessages() {
   const list = $('#messages')
@@ -155,6 +264,7 @@ function updateControls(refreshKey = false) {
 }
 
 function openSettings() {
+  closeLibrary()
   closeModelMenu()
   updateControls(true)
   $('#sheet').classList.add('open')
@@ -206,7 +316,14 @@ async function sendMessage() {
   $('#prompt').value = ''
   $('#prompt').style.height = ''
   messages.push({ role: 'user', content })
-  const history = buildHistory(messages, saveTokens)
+  const remembered = explicitMemory(content)
+  if (remembered && !memories.some((item) => item.text === remembered)) {
+    memories.unshift({ id: crypto.randomUUID(), text: remembered, createdAt: Date.now() })
+    persistMemories()
+    toast('已加入长期记忆')
+  }
+  persistConversation()
+  const history = buildHistory(messages, saveTokens, memories)
   const reply = { role: 'assistant', content: '正在思考…' }
   messages.push(reply)
   const bubble = renderMessages()
@@ -246,6 +363,7 @@ async function sendMessage() {
       if (messages.at(-1) === reply) bubble.textContent = reply.content
       else renderMessages()
       setSending(false)
+      persistConversation()
     }
     if (controller === request) controller = null
   }
@@ -270,10 +388,27 @@ $('#newChat').addEventListener('click', () => {
   conversationVersion++
   controller?.abort()
   setSending(false)
+  activeConversationId = null
   messages = []
   renderMessages()
+  closeLibrary()
   toast('已开始新对话')
   $('#prompt').focus()
+})
+$('#library').addEventListener('click', openLibrary)
+$('#closeLibrary').addEventListener('click', closeLibrary)
+$('#libraryBackdrop').addEventListener('click', closeLibrary)
+$('#historyTab').addEventListener('click', () => showLibraryTab('history'))
+$('#memoryTab').addEventListener('click', () => showLibraryTab('memory'))
+$('#memoryForm').addEventListener('submit', (event) => {
+  event.preventDefault()
+  const text = $('#memoryInput').value.trim()
+  if (!text) return
+  if (memories.some((item) => item.text === text)) { toast('这条记忆已经存在'); return }
+  memories.unshift({ id: crypto.randomUUID(), text, createdAt: Date.now() })
+  $('#memoryInput').value = ''
+  persistMemories()
+  toast('已加入长期记忆')
 })
 $('#settings').addEventListener('click', openSettings)
 $('#profileButton').addEventListener('click', openSettings)
@@ -300,7 +435,7 @@ document.addEventListener('click', (event) => {
   if (!event.target.closest('.model-picker')) closeModelMenu()
 })
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') { closeModelMenu(); closeSettings() }
+  if (event.key === 'Escape') { closeModelMenu(); closeSettings(); closeLibrary() }
 })
 
 document.querySelectorAll('.provider-chip').forEach((button) => button.addEventListener('click', () => {
@@ -375,4 +510,5 @@ $('#deleteKey').addEventListener('click', () => {
 
 updateControls(true)
 renderMessages()
+renderLibrary()
 if (localMode && !keys[activeProvider.id]) openSettings()

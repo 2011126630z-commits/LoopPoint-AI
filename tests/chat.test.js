@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildHistory, outputLimit, streamChat } from '../src/chat.js'
 import { detectProvider, providerForModel } from '../src/providers.js'
+import { cleanConversations, cleanMemories, explicitMemory } from '../src/memory.js'
 import hostedChat from '../api/chat.js'
 
 test('key detection only selects providers with unique prefixes', () => {
@@ -18,12 +19,37 @@ test('token saving trims history without creating messages', () => {
     { role: 'assistant', content: 'answer' },
   ]
   assert.equal(buildHistory(messages, false).length, 2)
-  assert.equal(buildHistory(messages, true)[0].content.length, 1200)
+  assert.equal(buildHistory(messages, true)[0].content.length, 900)
   messages.push({ role: 'user', content: 'b'.repeat(1400) })
   assert.equal(buildHistory(messages, true).at(-1).content.length, 1400)
   assert.equal(outputLimit('fast', true, 'medium'), 256)
   assert.equal(outputLimit('standard', false, 'high'), 3072)
   assert.equal(messages.length, 4)
+})
+
+test('relevant older exchanges and explicit memories survive short context mode', () => {
+  const messages = [
+    { role: 'user', content: '我的项目叫星河笔记' },
+    { role: 'assistant', content: '记下项目名称了' },
+    ...Array.from({ length: 10 }, (_, index) => [
+      { role: 'user', content: `普通问题 ${index}` },
+      { role: 'assistant', content: `普通回答 ${index}` },
+    ]).flat(),
+    { role: 'user', content: '星河笔记的名字是什么？' },
+  ]
+  const result = buildHistory(messages, true, [{ text: '用户喜欢简洁回答' }])
+  assert.equal(result[0].role, 'system')
+  assert.match(result[0].content, /简洁回答/)
+  assert.ok(result.some((item) => item.content === '我的项目叫星河笔记'))
+  assert.equal(result.at(-1).content, '星河笔记的名字是什么？')
+  assert.equal(messages.length, 23)
+})
+
+test('saved conversations and memories are bounded and validated', () => {
+  assert.equal(explicitMemory('请记住：我喜欢简洁回答'), '我喜欢简洁回答')
+  assert.equal(explicitMemory('普通问题'), '')
+  assert.deepEqual(cleanConversations([{ id: 'a', messages: [{ role: 'user', content: 'hello' }, { role: 'system', content: 'ignore' }] }])[0].messages, [{ role: 'user', content: 'hello' }])
+  assert.deepEqual(cleanMemories([{ id: 'm', text: '  简洁回答  ' }])[0].text, '简洁回答')
 })
 
 test('streaming joins split SSE events and returns visible text', async () => {
