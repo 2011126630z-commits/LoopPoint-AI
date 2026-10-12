@@ -144,6 +144,11 @@ $('#app').innerHTML = `
           <div class="segmented" id="speedControl"><button type="button" data-speed="fast">快速</button><button type="button" data-speed="standard">标准</button></div>
         </div>
         <div class="setting-block toggle-row"><label for="saveTokens">省 Token 模式</label><input id="saveTokens" type="checkbox" role="switch"></div>
+        <div class="setting-block install-block" id="installBlock" hidden>
+          <h3>安装到手机</h3>
+          <p id="installHint" class="install-hint"></p>
+          <button id="installButton" class="save-key" type="button" hidden>添加到主屏幕</button>
+        </div>
       </div>
     </section>
   </div>
@@ -679,6 +684,48 @@ window.addEventListener('resize', syncViewport)
 window.addEventListener('orientationchange', syncViewport)
 $('#prompt').addEventListener('focus', () => setTimeout(syncViewport, 250))
 syncViewport()
+
+// Installed-app support: the manifest, icons and service worker turn the page
+// into a normal phone app (home screen icon, full screen, offline shell).
+const installed = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator.standalone === true
+const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+let installPrompt = null
+
+function renderInstall() {
+  const block = $('#installBlock')
+  if (installed) { block.hidden = true; return }
+  block.hidden = false
+  const button = $('#installButton')
+  const hint = $('#installHint')
+  button.hidden = !installPrompt
+  if (installPrompt) hint.textContent = '安装后从主屏幕直接打开，全屏显示，和普通 App 一样。'
+  else if (isIos) hint.textContent = '在 Safari 里点「分享」按钮，再选「添加到主屏幕」，图标和名字会自动填好。'
+  else hint.textContent = '在浏览器菜单里选择「安装应用」或「添加到主屏幕」。'
+}
+
+$('#installButton').addEventListener('click', async () => {
+  if (!installPrompt) return
+  installPrompt.prompt()
+  const choice = await installPrompt.userChoice.catch(() => null)
+  installPrompt = null
+  if (choice?.outcome === 'accepted') toast('已添加到主屏幕')
+  renderInstall()
+})
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault()
+  installPrompt = event
+  renderInstall()
+})
+window.addEventListener('appinstalled', () => {
+  installPrompt = null
+  toast('已添加到主屏幕')
+  renderInstall()
+})
+renderInstall()
+
+if (!localMode && import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}))
+}
 
 updateControls(true)
 renderMessages()

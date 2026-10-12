@@ -10,7 +10,7 @@ const scripts = [...source.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((
 
 test('standalone file ships a parseable inline bundle', () => {
   assert.ok(scripts.length >= 2, 'expected a flag script and the app bundle')
-  assert.equal(scripts[0], 'window.LOOPPOINT_STANDALONE=true;')
+  assert.ok(scripts.includes('window.LOOPPOINT_STANDALONE=true;'), 'expected the standalone flag')
   for (const [index, body] of scripts.entries()) {
     assert.doesNotThrow(() => new vm.Script(body, { filename: `inline-${index}.js` }), `inline script ${index} must parse`)
   }
@@ -30,4 +30,12 @@ test('standalone file keeps assets inline and drops external references', () => 
   assert.ok(!/<script[^>]+src=/.test(source), 'no external script tags')
   assert.ok(!/<link[^>]+href="\/assets\//.test(source), 'no external asset links')
   assert.ok(!source.includes('\r'), 'standalone file must use LF endings so CI can compare it byte-for-byte')
+})
+
+test('standalone file inlines its icons and builds the manifest at runtime', () => {
+  assert.ok(source.includes('data:image/svg+xml;base64,'), 'the favicon should be inlined')
+  assert.ok(source.includes('data:image/png;base64,'), 'the touch icon should be inlined')
+  assert.ok(!source.includes('/manifest.webmanifest'), 'a downloaded file must not reference a missing manifest')
+  assert.ok(!source.includes('href="/icons/'), 'a downloaded file must not reference missing icon files')
+  assert.ok(source.includes("link.rel = 'manifest'"), 'a hosted copy should still be installable')
 })

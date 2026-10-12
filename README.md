@@ -18,6 +18,32 @@
 
 修改源码后运行 `npm run build:standalone` 可重新生成单文件版。
 
+## 安装到手机（App 图标）
+
+部署后的网址本身就是一个可安装的 App（PWA）：有独立图标、名字、全屏运行，并把界面缓存下来，断网也能打开（聊天需要联网）。浏览器只在 `http(s)` 下允许安装，所以要用部署地址，而不是直接打开下载到本地的 HTML 文件。
+
+- **Android / Chrome、Edge**：打开网址后在设置面板里点「添加到主屏幕」，或从浏览器菜单选「安装应用」。安装后桌面图标会显示 LoopPoint 的标记。
+- **iPhone / Safari**：点「分享」→「添加到主屏幕」。图标取自 `apple-touch-icon.png`，名称显示为 `LoopPoint`。
+- 已经以 App 方式打开时，设置面板里的「安装到手机」一栏会自动隐藏。
+
+图标都从 [public/favicon.svg](./public/favicon.svg) 的品牌标记生成，覆盖了各家系统的裁剪规则：
+
+| 用途 | 文件 | 说明 |
+| --- | --- | --- |
+| 普通图标 | `icons/icon-192.png`、`icons/icon-512.png` | 保留 favicon 的圆角正方形 |
+| 自适应图标 | `icons/maskable-192.png`、`icons/maskable-512.png` | 全出血深绿底，标记落在 80% 安全区内，圆形/圆角/方形容器裁剪都不会切到图形 |
+| iOS 主屏 | `apple-touch-icon.png` | 180×180、不透明，由 iOS 自己加圆角 |
+| Android 13 主题图标 | `icons/monochrome-512.png` | 透明底白色字形 |
+| 浏览器标签页 | `favicon.svg`、`favicon.ico`、`icons/favicon-32.png`、`icons/favicon-16.png` | 多尺寸 |
+
+图标需要重新生成时运行（依赖 Pillow）：
+
+```bash
+python scripts/build-icons.py
+```
+
+单文件版 `deepseek-mobile.html` 会把图标以 data URI 内联，并在 `http(s)` 下用 Blob 生成清单，因此把它托管起来同样可以安装；用文件管理器直接打开则无法安装，这是浏览器的限制。
+
 ## 开发
 
 ```bash
@@ -26,7 +52,7 @@ npm test
 npm run dev
 ```
 
-`npm test` 覆盖 Markdown 渲染（含转义与链接白名单）、记忆/备份合并逻辑，以及 `deepseek-mobile.html` 中内联脚本能否正常解析。`npm run build:standalone` 在写出单文件版前会校验内联脚本没有被替换模式（`$&`、`` $` `` 等）篡改，损坏时会直接报错而不是生成打不开的文件。
+`npm test` 覆盖 Markdown 渲染（含转义与链接白名单）、记忆/备份合并逻辑、图标与清单是否匹配（含 maskable 安全区、透明主题图标）、Service Worker 的预缓存与离线回退，以及 `deepseek-mobile.html` 中内联脚本能否正常解析。`npm run build:standalone` 在写出单文件版前会校验内联脚本没有被替换模式（`$&`、`` $` `` 等）篡改，损坏时会直接报错而不是生成打不开的文件。
 
 如果要让服务端默认提供 DeepSeek，把 `.env.example` 复制为 `.env`，在其中填入 `DEEPSEEK_API_KEY`。在没有服务端密钥时，用户仍可在浏览器设置里输入自己的平台密钥。开发地址通常为 `http://localhost:5173`。
 
