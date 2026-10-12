@@ -664,6 +664,22 @@ $('#deleteKey').addEventListener('click', () => {
   toast(`已删除 ${activeProvider.name} 密钥`)
 })
 
+// Keep the app shell equal to the visible viewport so the composer stays glued
+// to the bottom edge when mobile keyboards or browser bars resize it.
+function syncViewport() {
+  const viewport = window.visualViewport
+  document.documentElement.style.setProperty('--app-height', `${Math.round(viewport?.height || window.innerHeight)}px`)
+  document.documentElement.style.setProperty('--app-top', `${Math.round(viewport?.offsetTop || 0)}px`)
+  const list = $('#messages')
+  if (list && list.scrollHeight - list.scrollTop - list.clientHeight < 120) list.scrollTop = list.scrollHeight
+}
+window.visualViewport?.addEventListener('resize', syncViewport)
+window.visualViewport?.addEventListener('scroll', syncViewport)
+window.addEventListener('resize', syncViewport)
+window.addEventListener('orientationchange', syncViewport)
+$('#prompt').addEventListener('focus', () => setTimeout(syncViewport, 250))
+syncViewport()
+
 updateControls(true)
 renderMessages()
 if (localMode && !keys[activeProvider.id]) openSettings()

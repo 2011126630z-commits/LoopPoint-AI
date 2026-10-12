@@ -1,12 +1,15 @@
 :root { font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1e2d29; background: #f7f9f7; font-synthesis: none; -webkit-font-smoothing: antialiased; }
 * { box-sizing: border-box; }
+html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
 body { margin: 0; min-width: 320px; }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
-.app { display: flex; flex-direction: column; height: 100dvh; min-height: 400px; }
-.toast { position: fixed; z-index: 40; top: 79px; left: 50%; max-width: calc(100vw - 30px); padding: 8px 12px; transform: translate(-50%, -8px); border: 1px solid #d8e8db; border-radius: 7px; background: #f3faf3; color: #2c705c; box-shadow: 0 5px 18px #173a2712; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
+/* The shell is pinned to the visual viewport so the bottom composer can never be
+   scrolled away, including when a phone keyboard shrinks the visible area. */
+.app { position: fixed; top: var(--app-top, 0px); left: 0; right: 0; display: flex; flex-direction: column; height: 100vh; height: var(--app-height, 100dvh); min-height: min(400px, var(--app-height, 100dvh)); }
+.toast { position: fixed; z-index: 40; top: calc(79px + env(safe-area-inset-top)); left: 50%; max-width: calc(100vw - 30px); padding: 8px 12px; transform: translate(-50%, -8px); border: 1px solid #d8e8db; border-radius: 7px; background: #f3faf3; color: #2c705c; box-shadow: 0 5px 18px #173a2712; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
 .toast.visible { opacity: 1; transform: translate(-50%, 0); }
-.topbar { display: flex; align-items: center; justify-content: space-between; flex: none; height: 70px; padding: 0 max(22px, calc((100vw - 1040px)/2)); border-bottom: 1px solid #e4ebe5; background: #fff; }
+.topbar { display: flex; align-items: center; justify-content: space-between; flex: none; height: calc(70px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) max(22px, calc((100vw - 1040px)/2)) 0; border-bottom: 1px solid #e4ebe5; background: #fff; }
 .brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .logo { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: 8px; background: #164438; }
 .logo i { width: 18px; height: 18px; border: 4px solid #c8e77d; border-right-color: #62b7a8; border-radius: 50%; transform: rotate(-35deg); }
@@ -109,8 +112,8 @@ button { cursor: pointer; }
 @keyframes menu-in { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 600px) {
-  .topbar { height: 62px; padding: 0 14px; }
-  .toast { top: 69px; }
+  .topbar { height: calc(62px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 14px 0; }
+  .toast { top: calc(69px + env(safe-area-inset-top)); }
   .brand strong { font-size: 16px; }
   .messages { padding: 23px 14px 30px; }
   .bubble { max-width: 86%; font-size: 14px; }
