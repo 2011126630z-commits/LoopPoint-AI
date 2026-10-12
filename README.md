@@ -2,6 +2,16 @@
 
 一个可在手机上安装使用的多模型 AI 聊天应用。支持 DeepSeek、OpenAI、OpenRouter、通义千问和智谱 GLM。
 
+## 下载
+
+| 版本 | 文件 | 说明 |
+| --- | --- | --- |
+| **Android** | [loopoint-ai-1.0.0.apk](./apk/loopoint-ai-1.0.0.apk) | 直接安装，桌面名称「环点AI」，约 138 KB |
+| **单文件网页版** | [deepseek-mobile.html](./deepseek-mobile.html) | 下载后用手机浏览器打开即可 |
+| 全部发行版 | [Releases](https://github.com/2011126630z-commits/LoopPoint-AI/releases) | 各版本 APK、单文件版与更新日志 |
+
+版本变化见 [CHANGELOG.md](./CHANGELOG.md)。
+
 ## Android APK
 
 [apk/loopoint-ai-1.0.0.apk](./apk/loopoint-ai-1.0.0.apk)（约 130 KB）是可直接安装的安卓安装包，桌面名称显示为 **环点AI**。
@@ -80,3 +90,18 @@ npm run dev
 ## 部署
 
 项目含 Vercel 配置，也可使用 `npm run build && npm start` 运行。服务端环境变量 `DEEPSEEK_API_KEY` 只用于没有自带密钥的 DeepSeek 请求；用户在网页设置里添加的密钥直接从浏览器发往所选平台，不会写入仓库或服务端日志。
+
+## 发版
+
+1. 改版本号：`package.json`、`android/app/src/main/AndroidManifest.xml`（`versionCode` 每次 +1，`versionName` 同步），并在 [CHANGELOG.md](./CHANGELOG.md) 顶部加一节。
+2. 验证并打包：`npm test && npm run build:apk`（APK 会自动内嵌最新的单文件版）。
+3. 提交推送后打标签并发 Release：
+
+```bash
+git add -A && git commit -m "Release 1.0.0" && git push origin main
+git tag v1.0.0 && git push origin v1.0.0
+gh release create v1.0.0 --title "环点AI v1.0.0" --notes-file CHANGELOG.md \
+  apk/loopoint-ai-1.0.0.apk deepseek-mobile.html
+```
+
+Release 里的 APK 与仓库 `apk/` 目录是同一个文件；`npm test` 会校验 APK 是否内嵌了当前的单文件版，忘记重打会直接失败。
