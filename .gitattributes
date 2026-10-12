@@ -1,3 +1,4 @@
-# The standalone build is generated, byte-compared in CI and downloaded by
-# users: keep it as text with LF endings on every platform.
-deepseek-mobile.html text eol=lf
+# HTML files feed the generated standalone build. Keep them LF on every
+# platform so Vite output (and therefore deepseek-mobile.html) is byte-identical
+# on Windows and CI.
+*.html text eol=lf
