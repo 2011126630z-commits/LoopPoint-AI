@@ -2,7 +2,7 @@ import './style.css'
 import { createIcons, Plus, ArrowUp, Square, Settings2, ChevronDown, ClipboardPaste, X, Trash2, History } from 'lucide'
 import { providers, providerById, providerForModel, detectProvider, modelName } from './providers.js'
 import { buildHistory, outputLimit, streamChat } from './chat.js'
-import { cleanConversations, cleanMemories, explicitMemory } from './memory.js'
+import { cleanConversations, cleanMemories, compactMessages, explicitMemory } from './memory.js'
 
 const localMode = window.LOOPPOINT_STANDALONE === true
 const $ = (selector) => document.querySelector(selector)
@@ -39,6 +39,7 @@ let sending = false
 let controller = null
 let conversationVersion = 0
 let toastTimer = null
+const newId = () => globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 
 function persistPreferences() {
   writeStorage(preferenceName, {
@@ -47,21 +48,21 @@ function persistPreferences() {
 }
 function persistConversation() {
   if (!messages.length) return
-  if (!activeConversationId) activeConversationId = crypto.randomUUID()
+  if (!activeConversationId) activeConversationId = newId()
   const item = {
     id: activeConversationId,
     title: messages.find((message) => message.role === 'user')?.content.trim().slice(0, 32) || '新对话',
     updatedAt: Date.now(),
-    messages: messages.filter((message) => message.content !== '正在思考…').slice(-100),
+    messages: compactMessages(messages.filter((message) => !message.pending)),
   }
   conversations = cleanConversations([item, ...conversations.filter((entry) => entry.id !== activeConversationId)])
   if (!writeStorage(conversationsName, conversations)) toast('浏览器未能保存对话记录')
-  renderLibrary()
+  if ($('#librarySheet').classList.contains('open')) renderLibrary()
 }
 function persistMemories() {
   memories = cleanMemories(memories)
   if (!writeStorage(memoriesName, memories)) toast('浏览器未能保存记忆')
-  renderLibrary()
+  if ($('#librarySheet').classList.contains('open')) renderLibrary()
 }
 function toast(message) {
   const element = $('#toast')
@@ -315,31 +316,42 @@ async function sendMessage() {
   setSending(true)
   $('#prompt').value = ''
   $('#prompt').style.height = ''
-  messages.push({ role: 'user', content })
+  messages = compactMessages([...messages, { role: 'user', content }])
   const remembered = explicitMemory(content)
   if (remembered && !memories.some((item) => item.text === remembered)) {
-    memories.unshift({ id: crypto.randomUUID(), text: remembered, createdAt: Date.now() })
+    memories.unshift({ id: newId(), text: remembered, createdAt: Date.now() })
     persistMemories()
     toast('已加入长期记忆')
   }
   persistConversation()
   const history = buildHistory(messages, saveTokens, memories)
-  const reply = { role: 'assistant', content: '正在思考…' }
+  const reply = { role: 'assistant', content: '正在思考…', pending: true }
   messages.push(reply)
   const bubble = renderMessages()
   let output = ''
   let frame = null
+  let timedOut = false
+  let inactivityTimer = null
+  const resetInactivityTimer = () => {
+    clearTimeout(inactivityTimer)
+    inactivityTimer = setTimeout(() => { timedOut = true; request.abort() }, 90000)
+  }
   const paint = () => {
     frame = null
     if (version !== conversationVersion) return
+    const list = $('#messages')
+    const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 100
     bubble.textContent = reply.content
-    $('#messages').scrollTop = $('#messages').scrollHeight
+    if (nearBottom) list.scrollTop = list.scrollHeight
   }
   try {
+    resetInactivityTimer()
     await streamChat({
       endpoint: provider.endpoint, apiKey: key, model, messages: history,
       maxTokens: outputLimit(speed, saveTokens, intelligence), signal: request.signal, proxy,
+      onActivity: resetInactivityTimer,
       onDelta(delta) {
+        resetInactivityTimer()
         output += delta
         reply.content = output
         if (frame === null) frame = requestAnimationFrame(paint)
@@ -349,17 +361,25 @@ async function sendMessage() {
   } catch (error) {
     if (version !== conversationVersion) return
     if (error.name === 'AbortError') {
-      if (!output) messages.pop()
-      else reply.content = output
-      toast('已停止生成')
+      if (timedOut) {
+        reply.content = '等待回复超时，请重试。'
+        reply.error = true
+        bubble.closest('.message').classList.add('error')
+      } else {
+        if (!output) messages.pop()
+        else reply.content = output
+        toast('已停止生成')
+      }
     } else {
       reply.content = error instanceof TypeError ? '连接失败，请检查网络或平台接口是否可用。' : error.message
       reply.error = true
       bubble.closest('.message').classList.add('error')
     }
   } finally {
+    clearTimeout(inactivityTimer)
     if (frame !== null) cancelAnimationFrame(frame)
     if (version === conversationVersion) {
+      reply.pending = false
       if (messages.at(-1) === reply) bubble.textContent = reply.content
       else renderMessages()
       setSending(false)
@@ -379,6 +399,7 @@ $('#prompt').addEventListener('input', () => {
   $('#prompt').style.height = `${Math.min($('#prompt').scrollHeight, 180)}px`
 })
 $('#prompt').addEventListener('keydown', (event) => {
+  if (event.isComposing || event.keyCode === 229) return
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
     $('#composer').requestSubmit()
@@ -405,7 +426,7 @@ $('#memoryForm').addEventListener('submit', (event) => {
   const text = $('#memoryInput').value.trim()
   if (!text) return
   if (memories.some((item) => item.text === text)) { toast('这条记忆已经存在'); return }
-  memories.unshift({ id: crypto.randomUUID(), text, createdAt: Date.now() })
+  memories.unshift({ id: newId(), text, createdAt: Date.now() })
   $('#memoryInput').value = ''
   persistMemories()
   toast('已加入长期记忆')
@@ -510,5 +531,4 @@ $('#deleteKey').addEventListener('click', () => {
 
 updateControls(true)
 renderMessages()
-renderLibrary()
 if (localMode && !keys[activeProvider.id]) openSettings()

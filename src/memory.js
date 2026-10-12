@@ -2,6 +2,12 @@ const MAX_CONVERSATIONS = 20
 const MAX_MESSAGES = 100
 const MAX_MEMORIES = 30
 
+export function compactMessages(messages) {
+  const recent = messages.slice(-MAX_MESSAGES)
+  while (recent[0]?.role === 'assistant') recent.shift()
+  return recent
+}
+
 export function explicitMemory(content) {
   const match = content.trim().match(/^(?:请|帮我)?记住(?:一下|这个|这点|：|:|，|,|\s)*(.*)$/s)
   return match?.[1]?.trim().slice(0, 240) || ''
@@ -13,9 +19,9 @@ export function cleanConversations(value) {
     id: item.id,
     title: String(item.title || '新对话').slice(0, 32),
     updatedAt: Number(item.updatedAt) || Date.now(),
-    messages: item.messages.slice(-MAX_MESSAGES).filter((message) => ['user', 'assistant'].includes(message?.role) && typeof message.content === 'string').map((message) => ({
+    messages: compactMessages(item.messages.filter((message) => ['user', 'assistant'].includes(message?.role) && typeof message.content === 'string').map((message) => ({
       role: message.role, content: message.content.slice(0, 12000), ...(message.error ? { error: true } : {}),
-    })),
+    }))),
   }))
 }
 

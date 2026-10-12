@@ -35,9 +35,20 @@ export function buildHistory(messages, saveTokens, memories = []) {
       : history[index].content.slice(-(saveTokens ? 900 : 3000)),
   }))
   const ranked = memories.map((item, index) => ({ text: item.text, score: relevance(item.text, query), index }))
+    .filter((item) => item.score > 0 || (!saveTokens && item.index === 0))
     .sort((a, b) => b.score - a.score || a.index - b.index)
-    .slice(0, saveTokens ? 4 : 10)
-  if (ranked.length) result.unshift({ role: 'system', content: `以下是用户明确要求记住的信息。仅在相关时使用，不要无端提及：\n${ranked.map((item) => `- ${item.text}`).join('\n')}` })
+  const selectedMemories = []
+  let memoryLength = 0
+  for (const item of ranked) {
+    if (selectedMemories.length >= (saveTokens ? 3 : 8)) break
+    const maxLength = saveTokens ? 400 : 1200
+    const remaining = maxLength - memoryLength
+    if (remaining <= 0) break
+    const text = item.text.slice(0, remaining)
+    selectedMemories.push(text)
+    memoryLength += text.length
+  }
+  if (selectedMemories.length) result.unshift({ role: 'system', content: `以下是用户明确要求记住的信息。仅在相关时使用，不要无端提及：\n${selectedMemories.map((text) => `- ${text}`).join('\n')}` })
   return result
 }
 
@@ -55,7 +66,7 @@ function apiError(status, data, key) {
   return new Error(String(message).replaceAll(key || '\0', '[密钥]'))
 }
 
-export async function streamChat({ endpoint, apiKey, model, messages, maxTokens, signal, onDelta, proxy = false }) {
+export async function streamChat({ endpoint, apiKey, model, messages, maxTokens, signal, onDelta, onActivity = () => {}, proxy = false }) {
   const response = await fetch(proxy ? '/api/chat' : endpoint, {
     method: 'POST',
     headers: {
@@ -76,6 +87,7 @@ export async function streamChat({ endpoint, apiKey, model, messages, maxTokens,
     const data = await response.json()
     const content = proxy ? data.message : data.choices?.[0]?.message?.content
     if (!content) throw new Error('没有收到回复，请重试。')
+    onActivity()
     onDelta(content)
     return content
   }
@@ -85,6 +97,26 @@ export async function streamChat({ endpoint, apiKey, model, messages, maxTokens,
   let pending = ''
   let result = ''
   let done = false
+  const consumeEvent = (event) => {
+    for (const line of event.split('\n')) {
+      if (!line.startsWith('data:')) continue
+      const data = line.slice(5).trim()
+      if (data === '[DONE]') { done = true; break }
+      try {
+        const payload = JSON.parse(data)
+        if (payload.error) throw apiError(0, payload, apiKey)
+        const part = payload.choices?.[0]?.delta
+        if (part?.reasoning_content || part?.content) onActivity()
+        if (typeof part?.content === 'string' && part.content) {
+          result += part.content
+          onDelta(part.content)
+        }
+      } catch (error) {
+        if (error instanceof SyntaxError) continue
+        throw error
+      }
+    }
+  }
 
   try {
     while (!done) {
@@ -95,20 +127,12 @@ export async function streamChat({ endpoint, apiKey, model, messages, maxTokens,
       while ((end = pending.indexOf('\n\n')) !== -1) {
         const event = pending.slice(0, end)
         pending = pending.slice(end + 2)
-        for (const line of event.split('\n')) {
-          if (!line.startsWith('data:')) continue
-          const data = line.slice(5).trim()
-          if (data === '[DONE]') { done = true; break }
-          try {
-            const delta = JSON.parse(data).choices?.[0]?.delta?.content
-            if (typeof delta === 'string' && delta) {
-              result += delta
-              onDelta(delta)
-            }
-          } catch { /* Ignore non-JSON stream metadata. */ }
-        }
+        consumeEvent(event)
+        if (done) break
       }
+      if (pending.length > 1_000_000) throw new Error('回复数据异常，请重试。')
     }
+    if (!done && pending.trim()) consumeEvent(pending)
   } finally {
     reader.releaseLock()
   }
