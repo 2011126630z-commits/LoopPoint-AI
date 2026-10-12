@@ -7,6 +7,7 @@
     "dev": "concurrently -n api,web -c cyan,green \"node server.js\" \"vite --host 0.0.0.0\"",
     "build": "vite build",
     "build:standalone": "npm run build && node scripts/build-standalone.mjs",
+    "test": "node --test",
     "preview": "npm run build && NODE_ENV=production node server.js",
     "start": "NODE_ENV=production node server.js"
   },

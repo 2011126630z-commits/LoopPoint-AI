@@ -1,17 +1,51 @@
 import './style.css'
-import { createIcons, Plus, ArrowUp, ChevronDown } from 'lucide'
+import { createIcons, Plus, ArrowUp, Square, Settings2, ChevronDown, ClipboardPaste, X, Trash2 } from 'lucide'
+import { providers, providerById, providerForModel, detectProvider, modelName } from './providers.js'
+import { buildHistory, outputLimit, streamChat } from './chat.js'
 
 const localMode = window.LOOPPOINT_STANDALONE === true
-const storageKey = 'looppoint_api_key'
 const $ = (selector) => document.querySelector(selector)
-function savedKey() {
-  try { return localStorage.getItem(storageKey) || '' } catch { return '' }
+const vaultName = 'looppoint_keys_v2'
+const preferenceName = 'looppoint_preferences'
+const tierNames = { low: '低', medium: '中', high: '高' }
+const speedNames = { fast: '快速', standard: '标准' }
+
+function readStorage(name, fallback) {
+  try { return JSON.parse(localStorage.getItem(name)) || fallback } catch { return fallback }
 }
-let key = localMode ? savedKey() : ''
+function writeStorage(name, value) {
+  try { localStorage.setItem(name, JSON.stringify(value)); return true } catch { return false }
+}
+const storedKeys = readStorage(vaultName, {})
+try {
+  const oldKey = localStorage.getItem('looppoint_api_key') || localStorage.getItem('deepseek_mobile_key')
+  if (oldKey && !storedKeys.deepseek) storedKeys.deepseek = oldKey
+} catch { /* Local file viewers may block storage. */ }
+const keys = { ...storedKeys }
+const prefs = readStorage(preferenceName, {})
+let activeProvider = providerById(prefs.provider) || providers[0]
+let intelligence = ['low', 'medium', 'high'].includes(prefs.intelligence) ? prefs.intelligence : 'medium'
+let speed = ['fast', 'standard'].includes(prefs.speed) ? prefs.speed : 'standard'
+let saveTokens = Boolean(prefs.saveTokens)
+let activeModel = activeProvider.models.some((model) => model.id === prefs.model) ? prefs.model : activeProvider.presets[intelligence]
 let messages = []
 let sending = false
-let sendAfterKey = false
-let selectedModel = 'deepseek-chat'
+let controller = null
+let conversationVersion = 0
+let toastTimer = null
+
+function persistPreferences() {
+  writeStorage(preferenceName, {
+    provider: activeProvider.id, model: activeModel, intelligence, speed, saveTokens,
+  })
+}
+function toast(message) {
+  const element = $('#toast')
+  element.textContent = message
+  element.classList.add('visible')
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => element.classList.remove('visible'), 2600)
+}
 
 $('#app').innerHTML = `
   <div class="app">
@@ -19,42 +53,61 @@ $('#app').innerHTML = `
       <div class="brand"><span class="logo" aria-hidden="true"><i></i></span><span><strong>LoopPoint <em>AI</em></strong><small>与想法继续对话</small></span></div>
       <div class="actions">
         <button id="newChat" class="icon-btn" type="button" aria-label="新对话" title="新对话"><i data-lucide="plus"></i></button>
-        ${localMode ? '<button id="settings" class="text-btn" type="button" title="设置密钥">密钥</button>' : ''}
+        <button id="settings" class="icon-btn" type="button" aria-label="设置" title="设置"><i data-lucide="settings-2"></i></button>
       </div>
     </header>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <main id="messages" class="messages" aria-live="polite"></main>
     <div class="composer-area">
       <form id="composer" class="composer">
-        <textarea id="prompt" rows="1" placeholder="发消息给 LoopPoint AI..." aria-label="消息"></textarea>
+        <textarea id="prompt" rows="1" maxlength="12000" placeholder="发消息给 LoopPoint AI..." aria-label="消息"></textarea>
         <div class="composer-tools">
           <div class="model-picker">
-            <button id="modelToggle" class="model-toggle" type="button" aria-label="选择模型" aria-haspopup="true" aria-expanded="false"><span class="model-dot"></span><span id="modelName">DeepSeek Chat</span><i data-lucide="chevron-down"></i></button>
+            <button id="modelToggle" class="model-toggle" type="button" aria-label="选择 AI 模型" aria-expanded="false"><span class="model-dot"></span><span id="modelName"></span><i data-lucide="chevron-down"></i></button>
             <div id="modelMenu" class="model-menu" hidden>
-              <button class="model-option active" type="button" data-model="deepseek-chat" aria-pressed="true"><span>DeepSeek Chat</span><small>日常对话</small></button>
-              <button class="model-option" type="button" data-model="deepseek-reasoner" aria-pressed="false"><span>DeepSeek Reasoner</span><small>深入思考</small></button>
+              ${providers.map((provider) => `<div class="model-group"><div class="model-group-title">${provider.name}</div>${provider.models.map((model) => `<button type="button" class="model-option" data-model="${model.id}">${model.name}</button>`).join('')}</div>`).join('')}
             </div>
           </div>
-          <div class="send-tools"><span id="status" role="status"></span><button id="send" class="send-btn" type="submit" aria-label="发送" title="发送"><i data-lucide="arrow-up"></i></button></div>
+          <div class="send-tools">
+            <button id="profileButton" class="profile-button" type="button" title="智能与速度设置"></button>
+            <button id="send" class="send-btn" type="submit" aria-label="发送" title="发送"><i class="send-icon" data-lucide="arrow-up"></i><i class="stop-icon" data-lucide="square" hidden></i></button>
+          </div>
         </div>
       </form>
-      <p class="credit">由 DeepSeek 提供回答</p>
+      <p class="credit">由所选模型提供回答</p>
     </div>
   </div>
-  ${localMode ? `<dialog id="keyDialog">
-    <form id="keyForm">
-      <div class="dialog-logo">✳</div>
-      <h2>连接 DeepSeek</h2>
-      <p>输入 API Key 即可开始对话。密钥只保存在这台设备，不会写进网页文件。</p>
-      <label for="apiKey">API Key</label>
-      <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" required>
-      <label class="remember"><input id="remember" type="checkbox" checked>在此设备记住密钥</label>
-      <div class="dialog-actions"><button id="cancelKey" type="button">取消</button><button class="primary" type="submit">连接</button></div>
-    </form>
-  </dialog>` : ''}
+  <div id="sheet" class="sheet" aria-hidden="true">
+    <div id="sheetBackdrop" class="sheet-backdrop"></div>
+    <section class="sheet-panel" aria-label="聊天设置">
+      <div class="sheet-head"><div><h2>聊天设置</h2><small id="keyState"></small></div><button id="closeSettings" class="icon-btn" type="button" aria-label="关闭设置"><i data-lucide="x"></i></button></div>
+      <div class="sheet-scroll">
+        <div class="setting-block">
+          <h3>AI 平台</h3>
+          <div id="providerList" class="provider-list">${providers.map((provider) => `<button type="button" class="provider-chip" data-provider="${provider.id}">${provider.name}<span></span></button>`).join('')}</div>
+        </div>
+        <div class="setting-block">
+          <div class="setting-heading"><h3>API Key</h3><button id="deleteKey" class="quiet-icon" type="button" title="删除此平台密钥" aria-label="删除此平台密钥"><i data-lucide="trash-2"></i></button></div>
+          <div class="key-row"><input id="apiKey" type="password" placeholder="输入或粘贴 API Key" autocomplete="off" aria-label="API Key"><button id="pasteKey" type="button" title="从剪贴板粘贴" aria-label="从剪贴板粘贴"><i data-lucide="clipboard-paste"></i></button></div>
+          <p id="keyHint" class="key-hint"></p>
+          <div class="key-actions"><label><input id="rememberKey" type="checkbox" checked>记住密钥</label><button id="saveKey" type="button" class="save-key">保存密钥</button></div>
+        </div>
+        <div class="setting-block">
+          <h3>智能档位</h3>
+          <div class="segmented" id="intelligenceControl"><button type="button" data-tier="low">低</button><button type="button" data-tier="medium">中</button><button type="button" data-tier="high">高</button></div>
+        </div>
+        <div class="setting-block">
+          <h3>回复速度</h3>
+          <div class="segmented" id="speedControl"><button type="button" data-speed="fast">快速</button><button type="button" data-speed="standard">标准</button></div>
+        </div>
+        <div class="setting-block toggle-row"><label for="saveTokens">省 Token 模式</label><input id="saveTokens" type="checkbox" role="switch"></div>
+      </div>
+    </section>
+  </div>
 `
-createIcons({ icons: { Plus, ArrowUp, ChevronDown } })
+createIcons({ icons: { Plus, ArrowUp, Square, Settings2, ChevronDown, ClipboardPaste, X, Trash2 } })
 
-function render() {
+function renderMessages() {
   const list = $('#messages')
   list.replaceChildren()
   if (!messages.length) {
@@ -63,10 +116,10 @@ function render() {
     empty.innerHTML = '<div class="empty-symbol">✳</div><h1>从这里开始</h1><p>把你的想法发过来。</p>'
     list.append(empty)
   }
-  for (const item of messages) {
+  for (const message of messages) {
     const row = document.createElement('div')
-    row.className = `message ${item.role}${item.error ? ' error' : ''}`
-    if (item.role === 'assistant') {
+    row.className = `message ${message.role}${message.error ? ' error' : ''}`
+    if (message.role === 'assistant') {
       const avatar = document.createElement('span')
       avatar.className = 'avatar'
       avatar.textContent = '✳'
@@ -74,112 +127,252 @@ function render() {
     }
     const bubble = document.createElement('div')
     bubble.className = 'bubble'
-    bubble.textContent = item.content
+    bubble.textContent = message.content
     row.append(bubble)
     list.append(row)
   }
   list.scrollTop = list.scrollHeight
+  return list.lastElementChild?.querySelector('.bubble')
 }
 
-function showKeyDialog() {
-  $('#apiKey').value = key
-  $('#remember').checked = Boolean(savedKey()) || !key
-  $('#keyDialog').showModal()
+function updateControls(refreshKey = false) {
+  $('#modelName').textContent = modelName(activeModel)
+  $('#profileButton').textContent = `${tierNames[intelligence]}档 · ${speedNames[speed]}`
+  $('#saveTokens').checked = saveTokens
+  $('#keyState').textContent = keys[activeProvider.id] ? `${activeProvider.name} 已连接` : `${activeProvider.name} 未连接`
+  if (refreshKey) {
+    $('#apiKey').value = keys[activeProvider.id] || ''
+    $('#rememberKey').checked = Boolean(storedKeys[activeProvider.id]) || !keys[activeProvider.id]
+    $('#keyHint').textContent = ''
+  }
+  document.querySelectorAll('.provider-chip').forEach((button) => {
+    button.classList.toggle('selected', button.dataset.provider === activeProvider.id)
+    button.classList.toggle('connected', Boolean(keys[button.dataset.provider]))
+  })
+  document.querySelectorAll('.model-option').forEach((button) => button.classList.toggle('selected', button.dataset.model === activeModel))
+  document.querySelectorAll('[data-tier]').forEach((button) => button.classList.toggle('selected', button.dataset.tier === intelligence))
+  document.querySelectorAll('[data-speed]').forEach((button) => button.classList.toggle('selected', button.dataset.speed === speed))
 }
 
-async function send() {
+function openSettings() {
+  closeModelMenu()
+  updateControls(true)
+  $('#sheet').classList.add('open')
+  $('#sheet').setAttribute('aria-hidden', 'false')
+}
+function closeSettings() {
+  $('#sheet').classList.remove('open')
+  $('#sheet').setAttribute('aria-hidden', 'true')
+  $('#apiKey').value = ''
+}
+function closeModelMenu() {
+  $('#modelMenu').hidden = true
+  $('#modelToggle').setAttribute('aria-expanded', 'false')
+}
+function changeProvider(providerId, announce = true) {
+  activeProvider = providerById(providerId)
+  activeModel = activeProvider.presets[intelligence]
+  persistPreferences()
+  updateControls(true)
+  if (announce) toast(`已切换为 ${activeProvider.name} · ${modelName(activeModel)}`)
+}
+
+function setSending(value) {
+  sending = value
+  $('#send').setAttribute('aria-label', value ? '停止生成' : '发送')
+  $('#send').title = value ? '停止生成' : '发送'
+  $('#send .send-icon').hidden = value
+  $('#send .stop-icon').hidden = !value
+  $('#profileButton').disabled = value
+}
+
+async function sendMessage() {
   const content = $('#prompt').value.trim()
   if (!content || sending) return
-  if (localMode && !key) {
-    sendAfterKey = true
-    showKeyDialog()
+  const key = keys[activeProvider.id]
+  const proxy = !localMode && activeProvider.id === 'deepseek' && !key
+  if (!key && !proxy) {
+    openSettings()
+    toast(`请先添加 ${activeProvider.name} 的 API Key`)
     return
   }
-  sending = true
-  $('#send').disabled = true
-  $('#status').textContent = '正在回复'
+  closeModelMenu()
+  const version = conversationVersion
+  const provider = activeProvider
+  const model = activeModel
+  const request = new AbortController()
+  controller = request
+  setSending(true)
   $('#prompt').value = ''
   $('#prompt').style.height = ''
   messages.push({ role: 'user', content })
-  const history = messages.filter((item) => !item.error).map(({ role, content: text }) => ({ role, content: text }))
-  messages.push({ role: 'assistant', content: '正在思考…' })
-  render()
+  const history = buildHistory(messages, saveTokens)
+  const reply = { role: 'assistant', content: '正在思考…' }
+  messages.push(reply)
+  const bubble = renderMessages()
+  let output = ''
+  let frame = null
+  const paint = () => {
+    frame = null
+    if (version !== conversationVersion) return
+    bubble.textContent = reply.content
+    $('#messages').scrollTop = $('#messages').scrollHeight
+  }
   try {
-    const response = await fetch(localMode ? 'https://api.deepseek.com/chat/completions' : '/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(localMode ? { Authorization: `Bearer ${key}` } : {}) },
-      body: JSON.stringify({ model: selectedModel, messages: history, stream: false }),
+    await streamChat({
+      endpoint: provider.endpoint, apiKey: key, model, messages: history,
+      maxTokens: outputLimit(speed, saveTokens, intelligence), signal: request.signal, proxy,
+      onDelta(delta) {
+        output += delta
+        reply.content = output
+        if (frame === null) frame = requestAnimationFrame(paint)
+      },
     })
-    const data = await response.json()
-    if (!response.ok) {
-      if (response.status === 401) throw new Error('密钥无效，请点右上角“密钥”重新填写。')
-      throw new Error(data.error?.message || data.error || `请求失败 (${response.status})`)
-    }
-    messages[messages.length - 1] = { role: 'assistant', content: localMode ? data.choices?.[0]?.message?.content || '没有收到回复。' : data.message || '没有收到回复。' }
+    reply.content = output || '没有收到回复。'
   } catch (error) {
-    messages[messages.length - 1] = { role: 'assistant', error: true, content: error instanceof TypeError ? '连接失败，请检查网络后再试。' : error.message }
+    if (version !== conversationVersion) return
+    if (error.name === 'AbortError') {
+      if (!output) messages.pop()
+      else reply.content = output
+      toast('已停止生成')
+    } else {
+      reply.content = error instanceof TypeError ? '连接失败，请检查网络或平台接口是否可用。' : error.message
+      reply.error = true
+      bubble.closest('.message').classList.add('error')
+    }
   } finally {
-    sending = false
-    $('#send').disabled = false
-    $('#status').textContent = ''
-    render()
+    if (frame !== null) cancelAnimationFrame(frame)
+    if (version === conversationVersion) {
+      if (messages.at(-1) === reply) bubble.textContent = reply.content
+      else renderMessages()
+      setSending(false)
+    }
+    if (controller === request) controller = null
   }
 }
 
-$('#composer').addEventListener('submit', (event) => { event.preventDefault(); send() })
+$('#composer').addEventListener('submit', (event) => {
+  event.preventDefault()
+  if (sending) controller?.abort()
+  else sendMessage()
+})
 $('#prompt').addEventListener('input', () => {
   $('#prompt').style.height = 'auto'
   $('#prompt').style.height = `${Math.min($('#prompt').scrollHeight, 180)}px`
 })
 $('#prompt').addEventListener('keydown', (event) => {
-  if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#composer').requestSubmit() }
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    $('#composer').requestSubmit()
+  }
 })
-$('#newChat').addEventListener('click', () => { messages = []; render(); $('#prompt').focus() })
-function closeModelMenu() {
-  $('#modelMenu').hidden = true
-  $('#modelToggle').setAttribute('aria-expanded', 'false')
-}
+$('#newChat').addEventListener('click', () => {
+  conversationVersion++
+  controller?.abort()
+  setSending(false)
+  messages = []
+  renderMessages()
+  toast('已开始新对话')
+  $('#prompt').focus()
+})
+$('#settings').addEventListener('click', openSettings)
+$('#profileButton').addEventListener('click', openSettings)
+$('#closeSettings').addEventListener('click', closeSettings)
+$('#sheetBackdrop').addEventListener('click', closeSettings)
+
 $('#modelToggle').addEventListener('click', () => {
   const open = $('#modelMenu').hidden
   $('#modelMenu').hidden = !open
   $('#modelToggle').setAttribute('aria-expanded', String(open))
 })
-document.querySelectorAll('.model-option').forEach((option) => {
-  option.addEventListener('click', () => {
-    selectedModel = option.dataset.model
-    $('#modelName').textContent = option.querySelector('span').textContent
-    document.querySelectorAll('.model-option').forEach((item) => {
-      const active = item === option
-      item.classList.toggle('active', active)
-      item.setAttribute('aria-pressed', String(active))
-    })
-    closeModelMenu()
-    $('#modelToggle').focus()
-  })
-})
+document.querySelectorAll('.model-option').forEach((button) => button.addEventListener('click', () => {
+  const nextProvider = providerForModel(button.dataset.model)
+  activeProvider = nextProvider
+  activeModel = button.dataset.model
+  intelligence = nextProvider.models.find((model) => model.id === activeModel).tier
+  persistPreferences()
+  updateControls(true)
+  closeModelMenu()
+  toast(`已切换为 ${nextProvider.name} · ${modelName(activeModel)}`)
+  if (!keys[nextProvider.id] && (localMode || nextProvider.id !== 'deepseek')) openSettings()
+}))
 document.addEventListener('click', (event) => {
   if (!event.target.closest('.model-picker')) closeModelMenu()
 })
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') closeModelMenu()
+  if (event.key === 'Escape') { closeModelMenu(); closeSettings() }
 })
 
-if (localMode) {
-  $('#settings').addEventListener('click', showKeyDialog)
-  $('#cancelKey').addEventListener('click', () => { sendAfterKey = false; $('#keyDialog').close() })
-  $('#keyForm').addEventListener('submit', (event) => {
-    event.preventDefault()
-    key = $('#apiKey').value.trim()
-    if (!key) return
-    try {
-      if ($('#remember').checked) localStorage.setItem(storageKey, key)
-      else localStorage.removeItem(storageKey)
-    } catch { $('#status').textContent = '密钥仅在当前页面有效' }
-    $('#keyDialog').close()
-    if (sendAfterKey) { sendAfterKey = false; $('#composer').requestSubmit() }
-    else $('#prompt').focus()
-  })
-}
+document.querySelectorAll('.provider-chip').forEach((button) => button.addEventListener('click', () => {
+  const pendingKey = $('#apiKey').value.trim()
+  const hasNewKey = pendingKey && pendingKey !== (keys[activeProvider.id] || '')
+  changeProvider(button.dataset.provider)
+  if (hasNewKey) {
+    $('#apiKey').value = pendingKey
+    inspectKey()
+  }
+}))
+document.querySelectorAll('[data-tier]').forEach((button) => button.addEventListener('click', () => {
+  intelligence = button.dataset.tier
+  activeModel = activeProvider.presets[intelligence]
+  persistPreferences()
+  updateControls()
+  toast(`智能已切换为${tierNames[intelligence]}档 · ${modelName(activeModel)}`)
+}))
+document.querySelectorAll('[data-speed]').forEach((button) => button.addEventListener('click', () => {
+  speed = button.dataset.speed
+  persistPreferences()
+  updateControls()
+  toast(`回复速度已切换为${speedNames[speed]}`)
+}))
+$('#saveTokens').addEventListener('change', () => {
+  saveTokens = $('#saveTokens').checked
+  persistPreferences()
+  toast(saveTokens ? '已开启省 Token 模式' : '已关闭省 Token 模式')
+})
 
-render()
-if (localMode && !key) showKeyDialog()
+function inspectKey() {
+  const value = $('#apiKey').value.trim()
+  const found = detectProvider(value)
+  if (found && found !== activeProvider.id) {
+    changeProvider(found, false)
+    $('#apiKey').value = value
+    $('#keyHint').textContent = `已识别为 ${activeProvider.name} 密钥`
+  } else if (found) $('#keyHint').textContent = `已识别为 ${activeProvider.name} 密钥`
+  else $('#keyHint').textContent = value ? '此类密钥格式多个平台共用，请确认上方平台。' : ''
+}
+$('#apiKey').addEventListener('input', inspectKey)
+$('#pasteKey').addEventListener('click', async () => {
+  try {
+    if (!navigator.clipboard?.readText) throw new Error('不可用')
+    const value = await navigator.clipboard.readText()
+    if (!value.trim()) { toast('剪贴板里没有文字'); return }
+    $('#apiKey').value = value.trim()
+    inspectKey()
+    toast('已从剪贴板粘贴')
+  } catch { toast('无法读取剪贴板，请长按输入框粘贴') }
+})
+$('#saveKey').addEventListener('click', () => {
+  const value = $('#apiKey').value.trim()
+  if (!value) { toast('请先输入 API Key'); $('#apiKey').focus(); return }
+  const found = detectProvider(value)
+  if (found && found !== activeProvider.id) { toast('密钥格式与所选平台不符'); return }
+  keys[activeProvider.id] = value
+  if ($('#rememberKey').checked) storedKeys[activeProvider.id] = value
+  else delete storedKeys[activeProvider.id]
+  if (!writeStorage(vaultName, storedKeys) && $('#rememberKey').checked) toast('当前浏览器无法保存密钥')
+  else toast(`${activeProvider.name} 密钥已保存`)
+  updateControls(true)
+  closeSettings()
+})
+$('#deleteKey').addEventListener('click', () => {
+  delete keys[activeProvider.id]
+  delete storedKeys[activeProvider.id]
+  writeStorage(vaultName, storedKeys)
+  updateControls(true)
+  toast(`已删除 ${activeProvider.name} 密钥`)
+})
+
+updateControls(true)
+renderMessages()
+if (localMode && !keys[activeProvider.id]) openSettings()

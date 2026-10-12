@@ -27,7 +27,7 @@ app.post('/api/chat', async (req, res) => {
     })
   }
 
-  const { messages, model = 'deepseek-chat', temperature = 0.7 } = req.body || {}
+  const { messages, model = 'deepseek-chat', max_tokens = 2048 } = req.body || {}
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: 'messages must be a non-empty array.' })
@@ -56,7 +56,7 @@ app.post('/api/chat', async (req, res) => {
       body: JSON.stringify({
         model,
         messages: safeMessages,
-        temperature: Number(temperature),
+        max_tokens: Math.min(8192, Math.max(1, Number(max_tokens) || 2048)),
         stream: false,
       }),
     })
