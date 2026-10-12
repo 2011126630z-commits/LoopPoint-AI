@@ -18,6 +18,11 @@ dist-ssr
 site-artifact
 site-archive.tar.gz
 
+# Android build output and the generated asset copy
+build/
+android/app/src/main/assets/
+*.idsig
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -28,8 +28,8 @@ const inlineManifest = `<script>
 (function () {
   if (!/^https?:$/.test(location.protocol)) return;
   var manifest = ${JSON.stringify({
-    name: 'LoopPoint AI',
-    short_name: 'LoopPoint',
+    name: '环点 AI',
+    short_name: '环点AI',
     description: '多模型 AI 聊天，聊天记录只保存在本机。',
     lang: 'zh-CN',
     start_url: './',

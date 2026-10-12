@@ -76,7 +76,7 @@ function toast(message) {
 $('#app').innerHTML = `
   <div class="app">
     <header class="topbar">
-      <div class="brand"><span class="logo" aria-hidden="true"><i></i></span><span><strong>LoopPoint <em>AI</em></strong><small>与想法继续对话</small></span></div>
+      <div class="brand"><span class="logo" aria-hidden="true"><i></i></span><span><strong>环点<em>AI</em></strong><small>与想法继续对话</small></span></div>
       <div class="actions">
         <button id="library" class="icon-btn" type="button" aria-label="历史与记忆" title="历史与记忆"><i data-lucide="history"></i></button>
         <button id="newChat" class="icon-btn" type="button" aria-label="新对话" title="新对话"><i data-lucide="plus"></i></button>
@@ -230,8 +230,21 @@ function showLibraryTab(tab) {
 
 async function copyText(text, message) {
   try {
-    if (!navigator.clipboard?.writeText) throw new Error('unavailable')
-    await navigator.clipboard.writeText(text)
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      toast(message)
+      return
+    }
+    // WebViews and non-secure origins have no async clipboard API.
+    const area = document.createElement('textarea')
+    area.value = text
+    area.setAttribute('readonly', '')
+    area.style.cssText = 'position:fixed;top:0;left:0;opacity:0'
+    document.body.append(area)
+    area.select()
+    const copied = document.execCommand('copy')
+    area.remove()
+    if (!copied) throw new Error('unsupported')
     toast(message)
   } catch {
     toast('无法访问剪贴板，请长按选择复制')
@@ -521,11 +534,19 @@ $('#memoryTab').addEventListener('click', () => showLibraryTab('memory'))
 
 function exportBackup() {
   const payload = buildBackup(conversations, memories)
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const text = JSON.stringify(payload, null, 2)
+  const file = `huandian-ai-backup-${payload.exportedAt.slice(0, 10)}.json`
+  // Inside the Android app the system file picker handles the save and reports
+  // back through window.__loopPointNative.
+  if (window.LoopPointApp?.saveText) {
+    window.LoopPointApp.saveText(file, text)
+    return
+  }
+  const blob = new Blob([text], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `looppoint-backup-${payload.exportedAt.slice(0, 10)}.json`
+  link.download = file
   document.body.append(link)
   link.click()
   link.remove()
@@ -686,10 +707,12 @@ $('#prompt').addEventListener('focus', () => setTimeout(syncViewport, 250))
 syncViewport()
 
 // Installed-app support: the manifest, icons and service worker turn the page
-// into a normal phone app (home screen icon, full screen, offline shell).
-const installed = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator.standalone === true
+// into a normal phone app, and the Android build exposes window.LoopPointApp.
+const inAndroidApp = Boolean(window.LoopPointApp)
+const installed = inAndroidApp || window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator.standalone === true
 const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 let installPrompt = null
+window.__loopPointNative = (message) => toast(message)
 
 function renderInstall() {
   const block = $('#installBlock')

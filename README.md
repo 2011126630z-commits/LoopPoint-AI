@@ -1,6 +1,24 @@
-# LoopPoint AI
+# 环点AI（LoopPoint AI）
 
-一个可在手机本地打开的多模型 AI 聊天网页。支持 DeepSeek、OpenAI、OpenRouter、通义千问和智谱 GLM。
+一个可在手机上安装使用的多模型 AI 聊天应用。支持 DeepSeek、OpenAI、OpenRouter、通义千问和智谱 GLM。
+
+## Android APK
+
+[apk/loopoint-ai-1.0.0.apk](./apk/loopoint-ai-1.0.0.apk)（约 130 KB）是可直接安装的安卓安装包，桌面名称显示为 **环点AI**。
+
+- **安装**：把 APK 传到手机后点开安装；首次会提示允许「安装未知来源的应用」。已装过旧版本可直接覆盖升级（同一个签名）。
+- **完全离线**：APK 里是一个 WebView 壳 + 内置的 [deepseek-mobile.html](./deepseek-mobile.html)，只有调用 AI 接口时才联网，其余功能不依赖服务器。
+- **数据在本机**：聊天记录、密钥、长期记忆都存在应用自己的存储里；「导出备份」走系统文件选择器保存 JSON，「导入备份」走系统文件选择器读取。
+- **图标适配**：Android 8+ 用自适应图标，圆形/圆角方形/方形桌面容器都能正确裁剪；Android 13+ 支持主题取色。Android 7 及以下回退到多密度 PNG。
+- 首次打开会自动弹出设置面板，填入任意平台的 API Key 即可开始聊天。
+
+重新打包（需要 `ANDROID_HOME` 指向含 build-tools 与 platforms 的 SDK，以及 JDK 8+）：
+
+```bash
+npm run build:apk
+```
+
+打包**不需要 Gradle**：[scripts/build-apk.mjs](./scripts/build-apk.mjs) 直接用 `aapt2` 编译资源、`javac` 编译、`d8` 生成 dex、`zipalign` 对齐、`apksigner` 签名。签名用的是 [android/keystore/loopoint.jks](./android/keystore) 里的自签名密钥（密码 `looppoint`），**仅供侧载使用**；如果要上架 Google Play，请换成自己的正式密钥并妥善保管。
 
 ## 手机本地版
 
@@ -18,13 +36,13 @@
 
 修改源码后运行 `npm run build:standalone` 可重新生成单文件版。
 
-## 安装到手机（App 图标）
+## 安装到手机（PWA 图标）
 
-部署后的网址本身就是一个可安装的 App（PWA）：有独立图标、名字、全屏运行，并把界面缓存下来，断网也能打开（聊天需要联网）。浏览器只在 `http(s)` 下允许安装，所以要用部署地址，而不是直接打开下载到本地的 HTML 文件。
+把网页部署到 `http(s)` 后，它本身也是一个可安装的 App（PWA）：有独立图标、名字、全屏运行，并把界面缓存下来，断网也能打开（聊天需要联网）。浏览器只在 `http(s)` 下允许安装，所以要用部署地址，而不是直接打开下载到本地的 HTML 文件。
 
-- **Android / Chrome、Edge**：打开网址后在设置面板里点「添加到主屏幕」，或从浏览器菜单选「安装应用」。安装后桌面图标会显示 LoopPoint 的标记。
-- **iPhone / Safari**：点「分享」→「添加到主屏幕」。图标取自 `apple-touch-icon.png`，名称显示为 `LoopPoint`。
-- 已经以 App 方式打开时，设置面板里的「安装到手机」一栏会自动隐藏。
+- **Android / Chrome、Edge**：打开网址后在设置面板里点「添加到主屏幕」，或从浏览器菜单选「安装应用」；也可以用上面的 APK。
+- **iPhone / Safari**：点「分享」→「添加到主屏幕」。图标取自 `apple-touch-icon.png`，名称显示为 `环点AI`。
+- 已经以 App 方式打开时（含 APK），设置面板里的「安装到手机」一栏会自动隐藏。
 
 图标都从 [public/favicon.svg](./public/favicon.svg) 的品牌标记生成，覆盖了各家系统的裁剪规则：
 
@@ -34,6 +52,7 @@
 | 自适应图标 | `icons/maskable-192.png`、`icons/maskable-512.png` | 全出血深绿底，标记落在 80% 安全区内，圆形/圆角/方形容器裁剪都不会切到图形 |
 | iOS 主屏 | `apple-touch-icon.png` | 180×180、不透明，由 iOS 自己加圆角 |
 | Android 13 主题图标 | `icons/monochrome-512.png` | 透明底白色字形 |
+| Android 应用图标 | `android/app/src/main/res/mipmap-*/` | 每个密度一套：圆角 PNG、圆形 PNG、108dp 自适应前景 |
 | 浏览器标签页 | `favicon.svg`、`favicon.ico`、`icons/favicon-32.png`、`icons/favicon-16.png` | 多尺寸 |
 
 图标需要重新生成时运行（依赖 Pillow）：
@@ -52,7 +71,9 @@ npm test
 npm run dev
 ```
 
-`npm test` 覆盖 Markdown 渲染（含转义与链接白名单）、记忆/备份合并逻辑、图标与清单是否匹配（含 maskable 安全区、透明主题图标）、Service Worker 的预缓存与离线回退，以及 `deepseek-mobile.html` 中内联脚本能否正常解析。`npm run build:standalone` 在写出单文件版前会校验内联脚本没有被替换模式（`$&`、`` $` `` 等）篡改，损坏时会直接报错而不是生成打不开的文件。
+`npm test` 覆盖 Markdown 渲染（含转义与链接白名单）、记忆/备份合并逻辑、图标与清单是否匹配（含 maskable 安全区、透明主题图标）、Service Worker 的预缓存与离线回退、`deepseek-mobile.html` 中内联脚本能否正常解析，以及**提交的 APK 是否完整、是否内嵌了最新的单文件版**。`npm run build:standalone` 在写出单文件版前会校验内联脚本没有被替换模式（`$&`、`` $` `` 等）篡改，损坏时会直接报错而不是生成打不开的文件。
+
+改了 `deepseek-mobile.html` 之后要记得重新打包 APK（`npm run build:apk`），否则 `npm test` 里的 APK 同步检查会失败。
 
 如果要让服务端默认提供 DeepSeek，把 `.env.example` 复制为 `.env`，在其中填入 `DEEPSEEK_API_KEY`。在没有服务端密钥时，用户仍可在浏览器设置里输入自己的平台密钥。开发地址通常为 `http://localhost:5173`。
 

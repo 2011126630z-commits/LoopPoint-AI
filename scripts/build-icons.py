@@ -62,6 +62,30 @@ def save(image: Image.Image, path: Path) -> None:
     print(f"{path.relative_to(ROOT)}  {image.width}x{image.height}  {path.stat().st_size / 1024:.1f} KB")
 
 
+def circular(image: Image.Image) -> Image.Image:
+    mask = Image.new("L", image.size, 0)
+    ImageDraw.Draw(mask).ellipse([0, 0, image.width - 1, image.height - 1], fill=255)
+    out = image.copy()
+    out.putalpha(mask)
+    return out
+
+
+# Android wants a legacy PNG per density plus an adaptive foreground on a
+# transparent 108dp canvas (the background layer is res/values/colors.xml).
+ANDROID_DENSITIES = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
+
+
+def build_android() -> None:
+    res = ROOT / "android" / "app" / "src" / "main" / "res"
+    for density, size in ANDROID_DENSITIES.items():
+        folder = res / f"mipmap-{density}"
+        save(render(size, rounded=True, background=True), folder / "ic_launcher.png")
+        save(circular(render(size, rounded=False, background=True)), folder / "ic_launcher_round.png")
+        # 108dp canvas with the glyph inside the 66dp maskable safe circle.
+        save(render(round(size * 2.25), rounded=False, background=False, scale=0.92),
+             folder / "ic_launcher_foreground.png")
+
+
 def main() -> None:
     # "any": exactly the favicon mark, rounded corners included.
     for size in (192, 512):
@@ -83,6 +107,8 @@ def main() -> None:
     save(favicon.resize((16, 16), Image.LANCZOS), ICONS / "favicon-16.png")
     favicon.save(PUBLIC / "favicon.ico", sizes=[(16, 16), (32, 32), (48, 48)])
     print(f"public/favicon.ico  16/32/48  {(PUBLIC / 'favicon.ico').stat().st_size / 1024:.1f} KB")
+
+    build_android()
 
 
 if __name__ == "__main__":

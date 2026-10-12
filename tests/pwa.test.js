@@ -76,8 +76,8 @@ const BRAND_BACKGROUND = { r: 0x16, g: 0x44, b: 0x38 }
 
 test('manifest describes an installable standalone phone app', async () => {
   const manifest = JSON.parse(await read('public/manifest.webmanifest'))
-  assert.equal(manifest.name, 'LoopPoint AI')
-  assert.equal(manifest.short_name, 'LoopPoint')
+  assert.equal(manifest.name, '环点 AI')
+  assert.equal(manifest.short_name, '环点AI')
   assert.ok(manifest.short_name.length <= 12, 'short_name must not be truncated under the icon')
   assert.equal(manifest.lang, 'zh-CN')
   assert.equal(manifest.start_url, './')
@@ -133,7 +133,7 @@ test('index.html links the manifest and iOS home-screen metadata', async () => {
   assert.match(html, /<link rel="manifest" href="\/manifest\.webmanifest"/)
   assert.match(html, /<link rel="apple-touch-icon" href="\/apple-touch-icon\.png"/)
   assert.match(html, /<meta name="apple-mobile-web-app-capable" content="yes"/)
-  assert.match(html, /<meta name="apple-mobile-web-app-title" content="LoopPoint"/)
+  assert.match(html, /<meta name="apple-mobile-web-app-title" content="环点AI"/)
   assert.match(html, /<meta name="theme-color" content="#ffffff"/)
   assert.match(html, /viewport-fit=cover/)
 })

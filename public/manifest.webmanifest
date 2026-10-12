@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "LoopPoint AI",
-  "short_name": "LoopPoint",
+  "name": "环点 AI",
+  "short_name": "环点AI",
   "description": "多模型 AI 聊天：DeepSeek、OpenAI、OpenRouter、通义千问与智谱 GLM，聊天记录只保存在本机。",
   "lang": "zh-CN",
   "dir": "ltr",
@@ -10,7 +10,10 @@
   "display": "standalone",
   "background_color": "#f7f9f7",
   "theme_color": "#ffffff",
-  "categories": ["productivity", "utilities"],
+  "categories": [
+    "productivity",
+    "utilities"
+  ],
   "icons": [
     {
       "src": "icons/icon-192.png",
